@@ -1,0 +1,59 @@
+{
+ "format": "gofmt -w .",
+ "check": "go vet ./...",
+ "format_check": "test -z \"$(gofmt -l .)\"",
+ "protected": [
+  "_test\\.go$",
+  "^testdata/"
+ ],
+ "tasks": [
+  {
+   "id": "T1",
+   "title": "Implement slug.Slugify",
+   "test": "go test -v ./slug -run '^TestSlugify$' -count=1",
+   "tier": "normal",
+   "expect": [
+    "^--- PASS: TestSlugify \\(.*\\)$"
+   ]
+  },
+  {
+   "id": "T2",
+   "title": "Wrap rejects width < 1",
+   "test": "go test -v ./wrap -run '^TestWrapRejectsBadWidth$' -count=1",
+   "tier": "normal",
+   "expect": [
+    "^--- PASS: TestWrapRejectsBadWidth \\(.*\\)$"
+   ]
+  },
+  {
+   "id": "T3",
+   "title": "Wrap builds lines",
+   "test": "go test -v ./wrap -run '^TestWrapLines$' -count=1",
+   "tier": "normal",
+   "expect": [
+    "^--- PASS: TestWrapLines \\(.*\\)$"
+   ]
+  },
+  {
+   "id": "T4",
+   "title": "toy command",
+   "test": "go test -v ./cmd/toy -run '^TestRun$' -count=1",
+   "tier": "hard",
+   "expect": [
+    "^--- PASS: TestRun \\(.*\\)$"
+   ]
+  },
+  {
+   "id": "T5",
+   "title": "Whole tree: formatted, vetted, all tests green",
+   "test": "test -z \"$(gofmt -l .)\" && go vet ./... && go test -v ./... -count=1",
+   "tier": "normal",
+   "expect": [
+    "^--- PASS: TestSlugify \\(.*\\)$",
+    "^--- PASS: TestWrapRejectsBadWidth \\(.*\\)$",
+    "^--- PASS: TestWrapLines \\(.*\\)$",
+    "^--- PASS: TestRun \\(.*\\)$"
+   ]
+  }
+ ]
+}
