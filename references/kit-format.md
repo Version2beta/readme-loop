@@ -10,11 +10,26 @@ tasks.json       ordered tasks and the loop's per-kit settings
 scripts/loop.sh  copied unchanged from this skill
 README.md        exact commands to apply the kit and run the loop
 .gitignore       must contain .loop/
-...              stubs, complete files, tests, fixtures
+...              minimal writable stubs, protected tests and fixtures
 ```
 
 An overlay for a later stage contains only what it adds or replaces, plus
 the full `tasks.json`.
+
+## Protected-surface acceptance gate
+
+The kit author owns the specification and the judge; the implementation agent
+owns the implementation. Include a completed [protected-surface review](protected-surface.md)
+in a protected section of `SPEC.md` before acceptance, handoff, or any separately
+authorized commit. Revisit it for overlays and changes to the judge.
+Protect verification and contracts; leave production design and code writable
+unless an explicit contract or minimal deterministic verification seam requires
+otherwise. Prefer black-box behavioral checks. Tests that import internals can
+constrain architecture even when no production source is protected; account for
+those interfaces too. Do not copy reference production code into starting stubs.
+A successful private reference does not establish an unambiguous specification
+or sufficient judge. Preserve failing-stub/passing-reference checks and challenge
+incorrect behavior independently; never reduce coverage to simplify protection.
 
 ## tasks.json
 
@@ -23,7 +38,7 @@ the full `tasks.json`.
   "format": "gofmt -w .",
   "format_check": "test -z \"$(gofmt -l .)\"",
   "check": "go vet ./...",
-  "protected": ["_test\\.go$", "^testdata/", "^internal/event/"],
+  "protected": ["(^|/)README\\.md$", "_test\\.go$", "^testdata/", "^verification/"],
   "tasks": [
     {
       "id": "T1",
@@ -48,7 +63,7 @@ the full `tasks.json`.
 | `format` | Optional formatter, run after protected paths are restored and before judging. Failure discards the attempt. |
 | `format_check` | Optional non-writing format check. Must exit 0 in the judge, including `--check`. |
 | `check` | Optional non-writing whole-kit check (vet, lint, type check). Must exit 0 in the judge, including `--check`. |
-| `protected` | Extended regular expressions for paths the coder may not change: tests, fixtures, and every file marked "complete; do not change". The loop always adds `tasks.json`, `PROMPT.md`, `SPEC.md` and itself. |
+| `protected` | Extended regular expressions for paths the coder may not change: contracts, tests, fixtures, golden outputs, verification infrastructure, and specifically justified production exceptions recorded in the protected-surface review. A "complete; do not change" label alone does not justify production protection. The loop always adds `tasks.json`, `PROMPT.md`, `SPEC.md` and itself. |
 | `tasks[].test` | One shell command, run from the repository root. Must exit 0 and print every expected line on stdout. Stderr is logged separately and cannot satisfy expectations. |
 | `tasks[].expect` | Required, nonempty list of nonempty extended regular expressions (grep ERE). Each must match a complete stdout line (`grep -xE`), not a substring. An empty/missing list or invalid expression is a kit error naming the task. |
 | `tasks[].tier` | `normal` starts on the cheap model; `hard` starts on the strong one. |
@@ -150,9 +165,10 @@ every loop commit's `Coder-Command:` trailer.
 You are implementing one task in this repository. Work from the files only.
 
 1. Read SPEC.md and PROGRESS.md.
-2. Do the task below and nothing else. Keep every exported name, signature
-   and doc comment as it is. Code that already passes its tests stays as it
-   is unless this task requires changing it.
+2. Do the task below and nothing else. Own the production design and code
+   within SPEC.md's approved contract and reviewed interface constraints.
+   Internal names, signatures, packages and algorithms are yours to change
+   as needed for the task while preserving earlier required behavior.
 3. Never edit tests, fixtures, SPEC.md, tasks.json, PROMPT.md, the loop, or
    any file marked "complete; do not change". Changes there are reverted.
 4. Run the task's test command.

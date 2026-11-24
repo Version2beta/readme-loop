@@ -31,6 +31,7 @@ jobs:
         run: |
           bash -n scripts/install.sh scripts/loop.sh scripts/test_loop.sh tests/run.sh tests/fakecoder.sh
           python3 tests/test_install.py
+          python3 tests/test_kit_format.py
       - name: Runner regression tests (fake coders only)
         env:
           GIT_CONFIG_NOSYSTEM: '1'
@@ -46,6 +47,7 @@ jobs:
           mkdir unpacked
           tar -xzf readme-loop.tar.gz -C unpacked
           python3 unpacked/tests/test_install.py
+          python3 unpacked/tests/test_kit_format.py
       - uses: actions/upload-artifact@v4
         with:
           name: readme-loop-${{ matrix.os }}

@@ -9,11 +9,11 @@ The README describes the tool being built—not readme-loop itself. This documen
 ## Installation
 
 Install and authenticate your preferred coding agent: Claude Code, Pi, or Codex.
-You also need Bash and access to this private GitHub repository. For the clone
-command below, install GitHub CLI and sign in with `gh auth login` if needed.
+You also need Bash and Git. This public repository can be cloned without
+GitHub authentication:
 
 ```bash
-gh repo clone Version2beta/readme-loop
+git clone https://github.com/Version2beta/readme-loop.git
 cd readme-loop
 ```
 
@@ -85,6 +85,7 @@ out of the way first.
 
 ```bash
 python3 tests/test_install.py
+python3 tests/test_kit_format.py
 bash scripts/test_loop.sh
 bash tests/run.sh
 ```
@@ -93,8 +94,8 @@ Installer tests use temporary home directories. Runner tests use fake coders
 and disposable Git repositories, not real models; the toy suite also requires
 Go and Perl. CI defines Linux/macOS checks and an installable `readme-loop.tar.gz`
 artifact containing only the skill, README, references, scripts, and tests.
-No npm publication or release is configured. Private CI artifacts require
-repository access. CI execution is not implied by adding its workflow file.
+No npm publication or release is configured. Downloading CI artifacts through
+GitHub requires signing in. CI execution is not implied by adding its workflow file.
 
 ## Why start with a README?
 
@@ -216,7 +217,21 @@ Multiple kits for successive usable steps are expected when useful. Between kits
 
 Choose a usable stage. Derive tests and implementation tasks from the relevant approved root and module READMEs. Include checks at module boundaries where the promises depend on modules working together. For each promised behavior, identify how to verify it. Executable examples become acceptance checks where practical. Failures, privacy boundaries, and prohibited effects need checks too—not just the successful path.
 
-The strong model prepares the stage's tests, fixtures, interfaces, protected files, stubs, and ordered tasks. Each task has a bounded implementation scope and an explicit test command with expected passing output.
+The kit author owns the specification and the judge. The implementation agent owns the implementation.
+
+The strong model prepares the stage's tests, fixtures, minimal interfaces and stubs, protected verification files, and ordered tasks. Each task has a bounded implementation scope and an explicit test command with expected passing output. Prefer black-box verification through public interfaces and observable effects. Production data models, package boundaries, algorithms, concurrency, OS access, and architecture remain the implementation agent's responsibility unless the approved application contract requires otherwise.
+
+#### Protected-surface review
+
+Before a kit is accepted, handed off, or committed (with separate authorization), complete the [review template](references/protected-surface.md) in a protected section of its `SPEC.md`. Repeat for overlays and judge changes. Document:
+
+- Every protected production artifact or fixed interface, why it is necessary, its contract or verification justification, and the smallest alternative considered.
+- Engineering responsibilities already fulfilled by the kit and those remaining for the implementation agent.
+- Architectural constraints imposed by the judge, including internal imports and structural tests, with their contractual justification.
+
+Protect specifications, acceptance criteria, tests, fixtures, golden outputs, and verification infrastructure. Use the smallest practical deterministic simulation, interception, or injection interface; keep protected infrastructure free of application policy. A protected fake may simulate an OS response, but must not supply the application's qualification, retry, or scheduling decisions. Do not copy production code from the private reference into the starting implementation merely to facilitate testing. Structural checks may establish explicit properties such as side-effect isolation, not incidental reference architecture.
+
+Unjustified production protection or architecture blocks kit acceptance. Review actual protection-pattern matches, including future production paths; a complete-file label is not justification. Narrow the protected surface without weakening behavioral checks. The review is an authoring discipline, not additional runner enforcement.
 
 A promise that cannot be adequately checked is a visible limitation or a decision to resolve, not something to label verified.
 
@@ -230,7 +245,7 @@ Before handing the kit to the coder, the strong model writes a private reference
 - The built tool must be exercised through its user-facing interface using representative fixtures.
 - Later stages must preserve the earlier stage's checks; report whether this was verified against the owner's actual implementation or only the reference build.
 
-The reference implementation is not part of the coder's kit. It establishes that a passing implementation exists and helps expose defective assignments. It does not prove that the README captures every user need or that the tests exclude every incorrect implementation.
+The reference implementation is not part of the coder's kit. It establishes that a passing implementation exists and helps expose defective assignments. It does not prove that the specification is unambiguous, that the README captures every user need, or that the judge excludes every incorrect implementation. Review ambiguities and challenge plausible incorrect behavior independently; record residual coverage gaps.
 
 ### 5. Implement in a bounded loop
 
@@ -280,8 +295,10 @@ Tests provide evidence about the cases they exercise. They do not replace owner 
 | Decision | Rationale | Status |
 | --- | --- | --- |
 | Define `/readme-loop` in this project's root `SKILL.md`; this directory is the self-contained skill. Pi's explicit invocation is `/skill:readme-loop`, not a new slash-command extension. | Keep the first interface a portable skill rather than another executable integration. | Approved |
-| Support Claude Code, Pi, and Codex via a local copy installer after an authenticated private GitHub clone; test and archive the skill in CI without npm publication. | Give private-repository users a short install path without requiring a different agent or a custom download service. | Approved |
-| Reuse spec-loop's runner and kit format unchanged, with local copies. | Retain the existing verified implementation mechanics without a dependency on a separate installed skill. | Approved |
+| Support Claude Code, Pi, and Codex via a local copy installer after a GitHub clone; test and archive the skill in CI without npm publication. | Give users a short install path without requiring a different agent or a custom download service. | Approved |
+| Make the repository public and use an unauthenticated Git clone in installation instructions. | Remove private-repository access setup from the installation path. | Approved |
+| Reuse spec-loop's runner unchanged and retain its kit schema, adapting authoring guidance for minimal production protection. | Keep verified execution mechanics while assigning production engineering to the implementation agent. | Approved |
+| Require a protected-surface review before kit acceptance, handoff, or any separately authorized commit. | Preserve independent verification without silently prescribing production architecture. | Approved |
 | Root and module READMEs are authoritative; supporting specifications clarify them without contradiction or new promises. | Keep user-facing agreements in control while allowing precise implementation contracts. | Approved |
 | Discover existing `README`/`README.*` files, clarify ambiguity and material gaps, obtain stage/contract approval, then prepare a verified kit; require separate launch permissions. | Build from the owner's existing documents without silently choosing authority or starting implementation on discovery. | Approved |
 | Use progressive refinement and author-review intermissions between kits, not a separate automated design runner. | Surface consequential decisions early, use implementation evidence to refine the design, and leave independent future-kit decisions open. | Approved |
@@ -289,7 +306,7 @@ Tests provide evidence about the cases they exercise. They do not replace owner 
 ## Status
 
 First local skill packaged in [SKILL.md](SKILL.md), with the unchanged
-[runner](scripts/loop.sh), [kit format](references/kit-format.md), and their
+[runner](scripts/loop.sh), adapted [kit format](references/kit-format.md), and their
 self-contained regression scripts/fixtures. This is packaging and local test
 evidence, not an installed or live-trialed workflow.
 
@@ -324,23 +341,41 @@ Current local checks passed:
 - All 26 runner cases and 26 deliberate regression detections passed again;
   all 11 Go toy-kit assertions passed with isolated Git configuration,
   temporary Go caches, and downloads disabled.
-- Runner and kit-format hashes still match the values below.
+- At the installer-validation revision, runner and kit-format hashes matched
+  the original values below. The kit-format guidance has since changed.
 
 The Linux/macOS CI workflow is added but has not run on GitHub. These checks
 prove file installation and fixture behavior, not live agent discovery,
 authentication, model availability, or a real build. No installed user skills
 were changed and no real model calls were made.
 
+### Protected-surface methodology validation
+
+Local checks on this methodology update passed: two tests exercise the published
+kit example's EREs using grep, protecting contracts/verification while leaving
+production packages and progress notes writable. All six installer tests, 26
+runner cases with 26 deliberate regressions, and 11 toy-kit assertions passed.
+Shell syntax and `git diff --check` passed. The runner's hash is unchanged.
+CI now runs the example tests in source and extracted archives, but has not
+run for these uncommitted changes.
+
+The toy kit is a runner fixture with deliberately fixed function interfaces,
+not a complete example of an accepted README-derived application kit. Its unit
+tests and private toy reference remain useful regression evidence; they neither
+justify an application's architecture nor validate the review's engineering
+judgments. No drift files or installed skills were changed. No live models ran.
+
 ### Original packaging validation and provenance
 
 Copied from `/Users/rob/Development/skills/spec-loop` (the same directory linked
-at `/Users/rob/.pi/agent/skills/spec-loop`). The runner, format, regression
-scripts, and toy fixtures compare byte-for-byte with that source snapshot.
+at `/Users/rob/.pi/agent/skills/spec-loop`). At initial packaging, the runner,
+format, regression scripts, and toy fixtures compared byte-for-byte with that source snapshot. The runner remains unchanged;
+the format's authoring guidance now includes the protected-surface review.
 The source's `spec-loop` names and `SPEC.md` format are deliberately retained.
 SHA-256:
 
 - `scripts/loop.sh`: `4ed33daa824bd8ed999c141cf4abd55921981f5e8de86948408552b52dbb207f`
-- `references/kit-format.md`: `972367a9a45222b3070518ea3f632a2c974c2869aa0d39ba775dcf061a7de199`
+- Original `references/kit-format.md` (before methodology updates): `972367a9a45222b3070518ea3f632a2c974c2869aa0d39ba775dcf061a7de199`
 
 Checks run from this directory:
 

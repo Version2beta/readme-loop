@@ -23,8 +23,8 @@ from `/skills`). The bundled installer supports `--claude`, `--pi`, and
 Resolve bundled paths relative to this skill directory, not the tool's repo.
 Read [references/kit-format.md](references/kit-format.md) before preparing a
 kit and the header of [scripts/loop.sh](scripts/loop.sh) before running it.
-Both are unchanged local copies from spec-loop; do not rename their fields
-or rewrite the runner for README authority.
+The runner is an unchanged local copy from spec-loop; the kit format adapts
+its authoring guidance without changing runner fields or execution semantics.
 
 ## Roles and authority
 
@@ -259,25 +259,68 @@ READMEs and protected files; state local freedoms and the contract-change
 blocker procedure. Keep progress notes writable. The source toy fixtures test
 the inherited runner mechanics, not README authority.
 
-Include complete files for data types, prompts, parsers and outside seams,
-marked "complete; do not change" and protected. Supply exact exported names,
-signatures and contract comments in zero-value stubs for the remaining work.
+The kit author owns the specification and the judge. The implementation agent
+owns the implementation. Protect specifications, acceptance criteria, tests,
+fixtures, golden outputs, and verification infrastructure—not production code
+by default. Prefer black-box checks through public interfaces and observable
+effects. Leave production data models, package boundaries, algorithms,
+concurrency, OS-access code, and architecture to the coder unless the approved
+application contract requires otherwise. Stubs must leave real implementation
+work; exact names/signatures are required only for contractual public interfaces
+or specifically justified verification seams, not every internal function.
+
+For deterministic verification, prefer simulated environments or interception
+at existing external boundaries. If dependency injection is necessary, establish
+the smallest practical interface; keep protected infrastructure policy-free.
+Simulation may model external responses, but must not implement application
+selection, scheduling, retries, classification, or other production decisions.
+Do not copy production code from the private reference into the starting kit
+merely to facilitate testing. Keep structural checks only when they establish
+an explicit contractual property (for example, isolation of side effects), not
+the reference's package layout or internal types.
+
+### Protected-surface review (required acceptance gate)
+
+Before accepting, handing off, or committing a kit, complete the
+[protected-surface review](references/protected-surface.md) in a protected
+section of `SPEC.md`. Repeat for overlays and judge changes. Inventory actual
+paths matched by protection patterns, including runner-added protection, and
+interfaces imposed by tests even when their source files remain writable.
+Document every protected production artifact/interface with its contract anchor,
+necessity, smallest alternative considered, and what engineering work it supplies.
+Record separately work already fulfilled by the kit, work remaining for the
+coder, and every judge-imposed architectural constraint with its contractual
+justification. Explicitly record "none" where appropriate; unexplained protection
+or architecture blocks acceptance. Narrow overbroad patterns. A legitimate
+contractual seam or existing approved public API can remain fixed; a convenient
+reference design is not sufficient justification.
+
+Review coverage independently: reducing protection must not weaken behavioral
+checks. Preserve failing-stub and passing-reference evidence, challenge plausible
+incorrect implementations and ambiguous promises, and record coverage gaps.
+Reference success proves existence of a passing solution, not an unambiguous
+specification or a sufficient judge. This is an author review gate, not a new
+runner feature or automatic approval.
+
 Tests are table-driven where useful, with informative failures, fixtures and
 golden files nearby. Each ordered task has one explicit test command and a
 nonempty `expect` list of full-line stdout EREs; `pass_marker` is rejected.
 Use `normal` or `hard` tier. Put the formatted, checked, all-tests task last.
 An overlay replaces the old whole-tree task rather than leaving it mid-list.
 
-Keep external effects (models, environment, subprocesses, Git) behind testable
-seams; no test needs network access or a key. Use the standard library unless
-a dependency is approved. Prefer new files/packages for new behavior so overlays
-do not assume the earlier coder's internals. The inherited safe default is for
+Verify external effects (models, environment, subprocesses, Git) through public
+boundaries or minimal justified seams; no test needs network access or a key.
+Use the standard library unless a dependency is approved. Overlay checks must
+not assume earlier coder internals; leave file/package choices to the coder
+unless the approved application contract constrains them. The inherited safe default is for
 the built tool to write only under its own home, never dirty a user's project;
 any necessary exception is a consequential contract decision for approval.
 
 ## 4. Verify every kit before handoff
 
-1. Write a private reference implementation; exclude it from the coder's kit.
+1. Write a private reference implementation; exclude it and its production
+   scaffolding from the coder's kit. Complete the protected-surface review
+   before kit acceptance or any separately authorized commit.
 2. On supplied stubs, every new implementation task must fail. A passing stub
    means inadequate checks, a filter running no tests, or work already complete:
    fix the check (include a must-succeed case) or remove the task.
@@ -386,6 +429,9 @@ Approve the next layer inline, then prepare and reverify the next kit.
 - Root/module README paths and decisions with status, plus supporting spec paths.
 - Kit branch or zip/overlay, exact apply/check/run commands and owner-selected
   models; necessary permissions and prerequisites, without assuming permission.
+- Completed protected-surface review in `SPEC.md`: justified production
+  protection/interfaces, supplied and remaining engineering work, judge-imposed
+  architectural constraints, alternatives, coverage challenges, and unresolved gaps.
 - Stub/reference/judge/whole-stage/interface evidence and prior-stage results.
 - What remains unproven: owner implementation, harness integration, live models,
   real use, security or other untested promises as applicable.
