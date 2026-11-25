@@ -86,6 +86,7 @@ out of the way first.
 ```bash
 python3 tests/test_install.py
 python3 tests/test_kit_format.py
+python3 tests/test_runner_config.py
 bash scripts/test_loop.sh
 bash tests/run.sh
 ```
@@ -437,6 +438,13 @@ Still open / not performed:
 - [ ] Choice of the first small tool or stage for a workflow trial (deferred until before that trial).
 - [ ] A real README-derived kit, private-reference verification, and authorized live implementation trial with owner-selected model commands and spending/commit/discard permissions.
 - [ ] Real-use feedback and subsequent refinement; the article draft is not finished by this packaging step.
+
+## Development review
+
+See [the bounded maintenance report](references/development-review.md) for
+configuration validation, performance evidence, capability research, and proposed
+lifecycle accounting and comparative experiments. Proposed methodology changes
+are not approved requirements or a claim of independent review.
 
 ## Background
 

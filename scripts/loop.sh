@@ -32,9 +32,30 @@ done
 [ -f "$TASKS" ] || die "$TASKS not found"
 CHECK_ONLY=0; ONCE=0
 case "${1:-}" in
-  --check) CHECK_ONLY=1;;
+  --check) [ "$#" = 1 ] || die "--check takes no task ids"; CHECK_ONLY=1;;
   --check-once) CHECK_ONLY=1; ONCE=1; shift;;
+  '') [ "$#" = 0 ] || die "unexpected empty argument";;
+  *) die "unknown argument: $1";;
 esac
+# Reject malformed kits before creating state or executing any kit command.
+# Keep this one jq invocation: validation must not add per-judge overhead.
+jq -e '
+  type == "object" and
+  (.tasks | type == "array" and length > 0 and all(.[];
+    type == "object" and
+    (.id | type == "string" and length > 0) and
+    (.test | type == "string" and test("\\S")) and
+    ((.tier // "normal") | . == "normal" or . == "hard") and
+    ((.title // "") | type == "string"))) and
+  ([.format, .format_check, .check] | all(.[]; . == null or type == "string")) and
+  ((.protected // []) | type == "array" and all(.[]; type == "string" and length > 0))
+' "$TASKS" >/dev/null || die "invalid kit: expected nonempty tasks with string id/test, normal/hard tier, and string commands/protection patterns"
+jq -e '[.tasks[].id] | length == (unique | length)' "$TASKS" >/dev/null ||
+  die "duplicate task ids"
+while IFS= read -r pattern; do
+  rc=0; grep -E -- "$pattern" /dev/null >/dev/null 2>&1 || rc=$?
+  [ "$rc" -ne 2 ] || die "invalid protected regular expression: $pattern"
+done < <(jq -r '.protected[]?' "$TASKS")
 cfg() { jq -r "$1 // empty" "$TASKS"; }
 jq -e 'has("pass_marker") or any(.tasks[]?; has("pass_marker"))' "$TASKS" >/dev/null &&
   die "pass_marker is obsolete; use tasks[].expect full-line regular expressions"
