@@ -68,7 +68,7 @@ claim of availability. Confirm all three commands before any launch.
 The skill asks for your models, commands, tool permissions, and spending limits;
 it must not silently switch hosts or bypass permission checks. Launching the
 skill in one agent does not automatically configure the implementation runner.
-Unattended execution with Claude Code or Codex remains unverified. The unchanged runner commits
+Unattended execution with Claude Code or Codex remains unverified. The runner commits
 passing attempts and discards attempt-owned failed changes, so both actions
 need your explicit permission. Use an isolated, clean project checkout.
 
@@ -241,9 +241,12 @@ Before handing the kit to the coder, the strong model writes a private reference
 
 - Every implementation task must fail on the supplied stubs.
 - Every task must pass with the reference implementation under the same judge used by the loop.
+- The reference lives in a durable location outside the kit, never only in a temporary directory.
 - The whole-stage checks must pass.
 - The built tool must be exercised through its user-facing interface using representative fixtures.
 - Later stages must preserve the earlier stage's checks; report whether this was verified against the owner's actual implementation or only the reference build.
+
+Judging is the slow part of a stage: the runner's full `--check` re-runs every earlier task for each task, so its cost grows with the square of the task count. Verification of a fixed tree therefore uses `scripts/loop.sh --check-once`, which runs the same commands and expectations once each; a corrective kit's must-fail check runs only its new tasks. One full `--check` on the coder's build remains the stage's acceptance gate. Reviews of the specification and reference run before the coder loop, alongside verification, so specification flaws do not cost a coder round.
 
 The reference implementation is not part of the coder's kit. It establishes that a passing implementation exists and helps expose defective assignments. It does not prove that the specification is unambiguous, that the README captures every user need, or that the judge excludes every incorrect implementation. Review ambiguities and challenge plausible incorrect behavior independently; record residual coverage gaps.
 
@@ -297,7 +300,8 @@ Tests provide evidence about the cases they exercise. They do not replace owner 
 | Define `/readme-loop` in this project's root `SKILL.md`; this directory is the self-contained skill. Pi's explicit invocation is `/skill:readme-loop`, not a new slash-command extension. | Keep the first interface a portable skill rather than another executable integration. | Approved |
 | Support Claude Code, Pi, and Codex via a local copy installer after a GitHub clone; test and archive the skill in CI without npm publication. | Give users a short install path without requiring a different agent or a custom download service. | Approved |
 | Make the repository public and use an unauthenticated Git clone in installation instructions. | Remove private-repository access setup from the installation path. | Approved |
-| Reuse spec-loop's runner unchanged and retain its kit schema, adapting authoring guidance for minimal production protection. | Keep verified execution mechanics while assigning production engineering to the implementation agent. | Approved |
+| Reuse spec-loop's runner with unchanged attempt judging and kit schema, adapting authoring guidance for minimal production protection. | Keep verified execution mechanics while assigning production engineering to the implementation agent. | Approved |
+| Add a read-only `--check-once` to the runner; verify kits with single-pass checks and run the quadratic full `--check` once at stage acceptance; review spec and reference before the coder loop; keep references durable. | Measured on drift Stage 5a, judging took about 2 of roughly 3 hours per correction round and repeated identical deterministic tests. | Approved |
 | Require a protected-surface review before kit acceptance, handoff, or any separately authorized commit. | Preserve independent verification without silently prescribing production architecture. | Approved |
 | Root and module READMEs are authoritative; supporting specifications clarify them without contradiction or new promises. | Keep user-facing agreements in control while allowing precise implementation contracts. | Approved |
 | Discover existing `README`/`README.*` files, clarify ambiguity and material gaps, obtain stage/contract approval, then prepare a verified kit; require separate launch permissions. | Build from the owner's existing documents without silently choosing authority or starting implementation on discovery. | Approved |
@@ -305,8 +309,8 @@ Tests provide evidence about the cases they exercise. They do not replace owner 
 
 ## Status
 
-First local skill packaged in [SKILL.md](SKILL.md), with the unchanged
-[runner](scripts/loop.sh), adapted [kit format](references/kit-format.md), and their
+First local skill packaged in [SKILL.md](SKILL.md), with spec-loop's
+[runner](scripts/loop.sh) (plus `--check-once`), adapted [kit format](references/kit-format.md), and their
 self-contained regression scripts/fixtures. This is packaging and local test
 evidence, not an installed or live-trialed workflow.
 
@@ -365,11 +369,22 @@ tests and private toy reference remain useful regression evidence; they neither
 justify an application's architecture nor validate the review's engineering
 judgments. No drift files or installed skills were changed. No live models ran.
 
+### Verification-cost update
+
+`scripts/loop.sh --check-once [ID...]` runs `format_check`, the selected tasks
+and `check` once each, reusing the judge's functions; attempt judging and
+`--check` are unchanged. Three new runner cases (single run per task, task
+selection and unknown ids, format and kit checks) each catch a deliberate
+regression; all 29 runner cases and 29 regressions pass. The toy kit checks
+that stubs fail and the reference passes `--check-once`. The skill's
+verification procedure, review order and durable-reference rule were updated
+to match. The drift time savings are an estimate, not yet measured on a stage.
+
 ### Original packaging validation and provenance
 
 Copied from `/Users/rob/Development/skills/spec-loop` (the same directory linked
 at `/Users/rob/.pi/agent/skills/spec-loop`). At initial packaging, the runner,
-format, regression scripts, and toy fixtures compared byte-for-byte with that source snapshot. The runner remains unchanged;
+format, regression scripts, and toy fixtures compared byte-for-byte with that source snapshot. The runner has since added only `--check-once`;
 the format's authoring guidance now includes the protected-surface review.
 The source's `spec-loop` names and `SPEC.md` format are deliberately retained.
 SHA-256:

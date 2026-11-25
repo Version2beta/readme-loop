@@ -3,7 +3,9 @@
 # model commands are owner-only environment overrides, never kit settings.
 # Each attempt: coder, restore protected paths, format, judge, commit exactly
 # what was judged or discard the attempt. --check uses the same judge, no coder
-# or formatter. Requires bash, git, jq and timeout (or gtimeout).
+# or formatter. --check-once [ID...] runs format_check, each selected task and
+# check once each, for kit iteration on a fixed tree; it is not acceptance.
+# Requires bash, git, jq and timeout (or gtimeout).
 set -euo pipefail
 
 # Use '-' rather than ':-': an explicitly empty owner override is an error.
@@ -28,7 +30,11 @@ for setting in MAX_ITER MAX_ATTEMPTS ITER_SECONDS JUDGE_TIMEOUT; do
   [[ ${!setting} =~ ^[1-9][0-9]*$ ]] || die "$setting must be a positive integer"
 done
 [ -f "$TASKS" ] || die "$TASKS not found"
-CHECK_ONLY=0; [ "${1:-}" = --check ] && CHECK_ONLY=1
+CHECK_ONLY=0; ONCE=0
+case "${1:-}" in
+  --check) CHECK_ONLY=1;;
+  --check-once) CHECK_ONLY=1; ONCE=1; shift;;
+esac
 cfg() { jq -r "$1 // empty" "$TASKS"; }
 jq -e 'has("pass_marker") or any(.tasks[]?; has("pass_marker"))' "$TASKS" >/dev/null &&
   die "pass_marker is obsolete; use tasks[].expect full-line regular expressions"
@@ -100,6 +106,35 @@ first_failing() {
   for ((i = 0; i < ntasks; i++)); do task_passes "$i" || { echo "$i"; return; }; done
   echo -1
 }
+# Single pass over a fixed tree: the same commands, timeouts and full-line
+# expectations as the judge, but earlier tasks are not repeated per task.
+if [ "$ONCE" = 1 ]; then
+  selected=()
+  if [ "$#" = 0 ]; then
+    for ((i = 0; i < ntasks; i++)); do selected+=("$i"); done
+  else
+    for want in "$@"; do
+      found=
+      for ((i = 0; i < ntasks; i++)); do [ "$(task "$i" id)" != "$want" ] || found=$i; done
+      [ -n "$found" ] || die "--check-once: no task $want"
+      selected+=("$found")
+    done
+  fi
+  bad=0
+  if [ -n "$FORMAT_CHECK_CMD" ]; then
+    if run_judge_command format_check "$FORMAT_CHECK_CMD"; then r=pass; else r=FAIL; bad=1; fi
+    printf '%-5s %s\n' "$r" format_check
+  fi
+  for i in "${selected[@]}"; do
+    if task_passes "$i"; then r=pass; else r=FAIL; bad=1; fi
+    printf '%-5s %s  %s\n' "$r" "$(task "$i" id)" "$(task "$i" title)"
+  done
+  if [ -n "$CHECK_CMD" ]; then
+    if run_judge_command check "$CHECK_CMD"; then r=pass; else r=FAIL; bad=1; fi
+    printf '%-5s %s\n' "$r" check
+  fi
+  exit "$bad"
+fi
 if [ "$CHECK_ONLY" = 1 ]; then
   bad=0
   for ((i = 0; i < ntasks; i++)); do

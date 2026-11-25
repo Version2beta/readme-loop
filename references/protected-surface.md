@@ -61,7 +61,8 @@ architecture for contract approval rather than silently treating it as a test ne
 ## Verification and acceptance evidence
 
 - Every new implementation task fails on stubs; every task and whole-stage
-  check passes on the private reference with the unchanged runner's judge.
+  check passes on the private reference with the runner's judge
+  (`--check-once`; one full `--check` at stage acceptance).
 - Map behavioral promises (including failures and prohibited effects) to checks.
   Record plausible incorrect implementations challenged and what rejected them.
 - Record ambiguity review, residual judge weaknesses, missing integration

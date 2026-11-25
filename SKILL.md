@@ -1,6 +1,6 @@
 ---
 name: readme-loop
-description: Build or extend a tool from author-approved root and module READMEs, derive and privately verify bounded implementation kits, then use the unchanged spec-loop runner for test-judged coding. Use when asked for readme-loop, a README-first design or kit, or to run, review, or fix a readme-loop stage.
+description: Build or extend a tool from author-approved root and module READMEs, derive and privately verify bounded implementation kits, then use the spec-loop runner for test-judged coding. Use when asked for readme-loop, a README-first design or kit, or to run, review, or fix a readme-loop stage.
 license: MIT
 metadata:
   version: "0.1"
@@ -23,8 +23,9 @@ from `/skills`). The bundled installer supports `--claude`, `--pi`, and
 Resolve bundled paths relative to this skill directory, not the tool's repo.
 Read [references/kit-format.md](references/kit-format.md) before preparing a
 kit and the header of [scripts/loop.sh](scripts/loop.sh) before running it.
-The runner is an unchanged local copy from spec-loop; the kit format adapts
-its authoring guidance without changing runner fields or execution semantics.
+The runner is spec-loop's, unchanged in kit fields and attempt judging, plus
+one read-only addition: `--check-once` for fast kit verification. The kit
+format adapts its authoring guidance without changing runner fields.
 
 ## Roles and authority
 
@@ -318,22 +319,36 @@ any necessary exception is a consequential contract decision for approval.
 
 ## 4. Verify every kit before handoff
 
-1. Write a private reference implementation; exclude it and its production
-   scaffolding from the coder's kit. Complete the protected-surface review
-   before kit acceptance or any separately authorized commit.
+Judging, not coding, dominates stage time: `--check` re-runs every earlier
+task for each task, so its cost grows with the square of the task count. Use
+the single-pass `--check-once` (same commands, timeouts, full-line
+expectations, `format_check` and `check`, each run once) for every check on a
+fixed tree, and the full `--check` once, at stage acceptance.
+
+1. Write a private reference implementation and keep it in a durable location
+   outside the kit (for example `<tool>-private-reference/<stage>`), never only
+   in a temporary directory that a restart or cleanup can erase. Exclude it and
+   its production scaffolding from the coder's kit. Complete the
+   protected-surface review before kit acceptance or any separately
+   authorized commit.
 2. On supplied stubs, every new implementation task must fail. A passing stub
    means inadequate checks, a filter running no tests, or work already complete:
-   fix the check (include a must-succeed case) or remove the task.
-3. On the reference, every task passes using `scripts/loop.sh --check`, the
-   runner's own judge: format check, exit 0, all full-line expected stdout,
-   earlier tasks and kit check. Verify the whole stage too. Run `--check` on
-   stubs as well; the final whole-tree task must fail there.
-4. For overlays, apply to the previous build, compile and preserve every prior
+   fix the check (include a must-succeed case) or remove the task. For a
+   corrective kit over an existing build, run only the new and changed tasks:
+   `scripts/loop.sh --check-once ID...`. Earlier tasks are already evidenced.
+3. On the reference, every task, `format_check` and `check` pass with
+   `scripts/loop.sh --check-once`, the runner's own judge functions. On stubs
+   the final whole-tree task must fail.
+4. Stage acceptance: after the stage's last loop, run one full, unmodified
+   `scripts/loop.sh --check` on the coder's build. Its repetition also exposes
+   flaky or order-dependent tests. Corrective rounds before then use
+   `--check-once`.
+5. For overlays, apply to the previous build, compile and preserve every prior
    stage check. Report whether this was the owner's actual implementation or
    only the private reference. A sandbox result is not owner-build verification.
-5. Exercise the built program by hand through its user-facing interface with
+6. Exercise the built program by hand through its user-facing interface with
    representative fixtures, including promised examples where practical.
-6. Report precisely what was and was not verified. Passing fixtures show a
+7. Report precisely what was and was not verified. Passing fixtures show a
    solution exists; they neither establish every user need nor exclude every
    wrong solution. Never call an outline, build, reference, or local fixture
    test a live integration or actual-use validation.
@@ -364,7 +379,10 @@ the kit's language/check tools. Do not install prerequisites without permission.
   discards attempt-owned changes. Notes from discarded attempts are included
   for subsequent tasks too, not committed; logs/diffs remain in `.loop/`.
 - `--check` runs the same judge without a coder or formatter. Check commands
-  must not mutate the accepted source tree.
+  must not mutate the accepted source tree. `--check-once [ID...]` runs
+  `format_check`, the selected (default all) tasks and `check` once each,
+  printing `pass`/`FAIL` lines; unknown ids are an error. It never commits or
+  discards and does not replace `--check` for stage acceptance.
 - Limits: `MAX_ITER=60`, `MAX_ATTEMPTS=4`, `ITER_SECONDS=1200`,
   `JUDGE_TIMEOUT=300`. Owner environment overrides must be positive integers.
   Every formatter, format check, task test (including diagnostic probes) and
@@ -410,6 +428,19 @@ environment. Defaults are pinned, not dynamically selected from available models
 
 ## 6. Review, use, and refine between kits
 
+Order reviews to find problems before a coder round depends on them:
+
+- Before handoff, have an independent reviewer read the approved contract,
+  `SPEC.md`, tests and private reference (no coder code yet), concurrently with
+  kit verification. Specification flaws found here cost one kit edit instead of
+  a coder round, a judge run and a corrective kit.
+- After the loop, review the coder's build while it is being judged. Reading
+  code does not disturb timing-sensitive tests; serialize only work that does
+  (judge runs, timing-sensitive integration scenarios).
+- Batch every known finding into one corrective kit rather than one round per
+  finding. Record each step's wall time and model spend in the stage record so
+  slow steps are visible.
+
 Review the implementation diff for fixture-specific shortcuts and tests passed
 the wrong way. A stub's error can accidentally satisfy a check; a test-binary
 `init` can exit 0 without running tests. Judge by observed passing tests as
@@ -441,10 +472,11 @@ Approve the next layer inline, then prepare and reverify the next kit.
 ## Local maintenance checks
 
 After inspecting the scripts, run `bash scripts/test_loop.sh` for the inherited
-fake-coder regression suite (26 cases and deliberate mutations). Optionally run
+fake-coder regression suite (29 cases and deliberate mutations). Optionally run
 `bash tests/run.sh` for the inherited Go toy kit; it also requires Go and Perl.
 Both use disposable fixture Git repositories only, never a real kit or model.
 Keep these tests and the local runner self-contained. Compare runner and format
-bytes with the recorded source before claiming unchanged reuse. Installation,
+bytes with the recorded source before claiming unchanged reuse; the runner now
+differs from spec-loop only by `--check-once`. Installation,
 startup discovery and a live workflow trial are separate checks, not implied by
 these packaging tests.

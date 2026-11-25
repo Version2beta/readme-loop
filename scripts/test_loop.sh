@@ -266,6 +266,37 @@ SH
       contains .loop/loop.log "$field timed out after 1s: sleep 10"
       unchanged
       ;;
+    check-once)
+      printf 'good\n' > code
+      config '.tasks = [{id:"T0", title:"counted", test:"echo run >> .loop/t0-runs && echo EARLIER", expect:["EARLIER"], tier:"normal"}] + .tasks'
+      run --check-once; equal "$rc" 0 '--check-once passes a good tree'
+      equal "$(wc -l < .loop/t0-runs | tr -d ' ')" 1 '--check-once runs each task once'
+      contains "$work/output" 'pass  format_check'
+      contains "$work/output" 'pass  T0  counted'
+      contains "$work/output" 'pass  T1  fixture'
+      contains "$work/output" 'pass  check'
+      printf 'bad\n' > code
+      run --check-once; equal "$rc" 1 '--check-once fails a failing task'
+      contains "$work/output" 'FAIL  T1  fixture'
+      ;;
+    check-once-select)
+      printf 'good\n' > code
+      config '.tasks = [{id:"T0", title:"broken", test:"exit 1", expect:["NEVER"], tier:"normal"}] + .tasks'
+      run --check-once T1; equal "$rc" 0 '--check-once runs only selected tasks'
+      if grep -q 'T0' "$work/output"; then fail 'unselected task T0 was judged'; fi
+      run --check-once nosuch; equal "$rc" 1 'unknown task id refused'
+      contains "$work/output" 'no task nosuch'
+      ;;
+    check-once-gates)
+      printf ' g o o d \n' > code
+      run --check-once T1; equal "$rc" 1 '--check-once runs format_check'
+      contains "$work/output" 'FAIL  format_check'
+      equal "$(<code)" ' g o o d ' '--check-once does not format'
+      printf 'good\n' > code
+      config '.check = "exit 1"'
+      run --check-once T1; equal "$rc" 1 '--check-once runs kit check'
+      contains "$work/output" 'FAIL  check'
+      ;;
     *) fail "unknown case $1";;
   esac
 }
@@ -290,7 +321,7 @@ mutate() {
   [[ $source == *"$old"* ]] || fail "mutation anchor absent: $old"
   source=${source/"$old"/"$new"}
 }
-cases=(search-count notes notes-cross-task judge-writes formatter-protected good formatted protected substring stderr nonzero hang empty-command empty-expect missing-expect legacy untracked defaults hard escalation check-format check-command earlier timeout-format timeout-format-check timeout-check)
+cases=(search-count notes notes-cross-task judge-writes formatter-protected good formatted protected substring stderr nonzero hang empty-command empty-expect missing-expect legacy untracked defaults hard escalation check-format check-command earlier timeout-format timeout-format-check timeout-check check-once check-once-select check-once-gates)
 fails=0
 for name in "${cases[@]}"; do
   if bash "$0" --case "$name" "$loop" > "$work/case.log" 2>&1; then
@@ -339,6 +370,14 @@ $untracked"' ':'
     check-format) mutate 'if judge "$i"; then r=pass' 'if task_passes "$i"; then r=pass';;
     check-command) mutate 'if [ -n "$CHECK_CMD" ]; then run_judge_command check "$CHECK_CMD" || return 1; fi' ':';;
     earlier) mutate 'for ((j = 0; j < idx; j++)); do task_passes "$j" || return 1; done' ':';;
+    check-once) mutate '    if task_passes "$i"; then r=pass; else r=FAIL; bad=1; fi
+    printf' '    if judge "$i"; then r=pass; else r=FAIL; bad=1; fi
+    printf';;
+    check-once-select) mutate 'if [ "$#" = 0 ]; then' 'if true; then';;
+    check-once-gates)
+      mutate '    if run_judge_command format_check "$FORMAT_CHECK_CMD"; then r=pass' '    if true; then r=pass'
+      mutate '    if run_judge_command check "$CHECK_CMD"; then r=pass' '    if true; then r=pass'
+      ;;
   esac
   printf '%s\n' "$source" > "$work/regressed.sh"
   if bash "$0" --case "$name" "$work/regressed.sh" > "$work/mutation.log" 2>&1; then
