@@ -17,6 +17,9 @@ MAX_ATTEMPTS=${MAX_ATTEMPTS:-4}
 ITER_SECONDS=${ITER_SECONDS:-1200}
 JUDGE_TIMEOUT=${JUDGE_TIMEOUT:-300}
 TASKS=${TASKS:-tasks.json}
+# Fixed, not an owner setting: seconds between SIGTERM and SIGKILL when a
+# timed command ignores SIGTERM. Without it, timeout waits indefinitely.
+KILL_GRACE=5
 
 die() { echo "loop: $*" >&2; exit 1; }
 command -v jq >/dev/null || die "jq is required"
@@ -66,20 +69,52 @@ FORMAT_CMD=$(cfg '.format')
 FORMAT_CHECK_CMD=$(cfg '.format_check')
 CHECK_CMD=$(cfg '.check')
 PROTECTED=$(jq -r '(.protected // []) | join("|")' "$TASKS")
-PROTECTED="${PROTECTED:+$PROTECTED|}^(${TASKS}|PROMPT\.md|SPEC\.md|scripts/loop\.sh|loop\.sh)$|^STOP$"
+PROTECTED="${PROTECTED:+$PROTECTED|}^(PROMPT\.md|SPEC\.md|scripts/loop\.sh|loop\.sh)$|^STOP$"
+# The kit's own task file is protected by exact repository-relative name, not
+# by interpolating it into a regular expression: tasks+v2.json is literal, and
+# ./tasks.json or an absolute path inside the repository names tasks.json.
+tasks_rel=$TASKS
+while [ "${tasks_rel#./}" != "$tasks_rel" ]; do tasks_rel=${tasks_rel#./}; done
+if [ "${tasks_rel#/}" != "$tasks_rel" ]; then
+  # Git reports the physical top-level path; resolve the file's directory the same way.
+  top=$(git rev-parse --show-toplevel 2>/dev/null || true)
+  dir=$(cd "$(dirname "$tasks_rel")" 2>/dev/null && pwd -P || true)
+  if [ -n "$top" ] && [ "$dir" = "$top" ]; then tasks_rel=$(basename "$tasks_rel")
+  elif [ -n "$top" ] && [ "${dir#"$top"/}" != "$dir" ]; then tasks_rel=${dir#"$top"/}/$(basename "$tasks_rel"); fi
+fi
 ntasks=$(jq '.tasks | length' "$TASKS")
 [ "$ntasks" -gt 0 ] || die "no tasks"
+# Expectations are decoded below with the other fixed metadata, so they must be
+# nonempty lists of strings. NUL bytes would corrupt the NUL-delimited decoding.
+bad_expect=$(jq -r '.tasks[] | select((.expect | type) != "array" or (.expect | length) == 0 or any(.expect[]; type != "string" or length == 0)) | .id' "$TASKS")
+if [ -n "$bad_expect" ]; then
+  die "task ${bad_expect%%$'\n'*}: expect must be a nonempty list of full-line regular expressions"
+fi
+if jq -e 'any(.tasks[]; ([.id, (.title // ""), .test] + .expect) | any(contains("\u0000")))' "$TASKS" >/dev/null; then
+  die "invalid kit: task ids, titles, commands and expectations may not contain NUL bytes"
+fi
 # Task metadata is fixed for a run. Decode once rather than spawning jq for
 # every lookup during the quadratic acceptance check. NUL separators preserve
 # multiline commands/titles without shell evaluation; indexed arrays work in
 # macOS's Bash 3.2 as well as newer Bash versions.
 task_ids=(); task_titles=(); task_tests=(); task_tiers=()
+# Expectations are decoded here too, so judging never re-reads the kit file.
+# Each task's expectation count is followed by its values; starts index the
+# flat array. Judge order and full-line matching are unchanged.
+task_expect_counts=(); task_expect_starts=(); task_expect_values=()
+expect_total=0
 while IFS= read -r -d '' value; do
   task_ids+=("$value")
   IFS= read -r -d '' value; task_titles+=("$value")
   IFS= read -r -d '' value; task_tests+=("$value")
   IFS= read -r -d '' value; task_tiers+=("$value")
-done < <(jq -j '.tasks[] | (.id, .title, .test, .tier) | (. // "" | tostring), "\u0000"' "$TASKS")
+  IFS= read -r -d '' value; expect_count=$value
+  task_expect_counts+=("$expect_count"); task_expect_starts+=("$expect_total")
+  expect_total=$((expect_total + expect_count))
+  for ((k = 0; k < expect_count; k++)); do
+    IFS= read -r -d '' value; task_expect_values+=("$value")
+  done
+done < <(jq -j '.tasks[] | (.id, .title, .test, .tier, (.expect | length | tostring), .expect[]) | (. // "" | tostring), "\u0000"' "$TASKS")
 task() {
   case $2 in
     id) printf '%s\n' "${task_ids[$1]}";;
@@ -91,12 +126,11 @@ task() {
 for ((i = 0; i < ntasks; i++)); do
   id=$(task "$i" id)
   [[ $id =~ ^[a-zA-Z0-9_-]+$ ]] || die "task $i needs a simple, nonempty id"
-  jq -e ".tasks[$i].expect | type == \"array\" and length > 0 and all(.[]; type == \"string\" and length > 0)" "$TASKS" >/dev/null ||
-    die "task $id: expect must be a nonempty list of full-line regular expressions"
-  while IFS= read -r pattern; do
+  for ((k = 0; k < task_expect_counts[i]; k++)); do
+    pattern=${task_expect_values[task_expect_starts[i] + k]}
     rc=0; grep -E -- "$pattern" /dev/null >/dev/null 2>&1 || rc=$?
     [ "$rc" -ne 2 ] || die "task $id: invalid expect regular expression: $pattern"
-  done < <(jq -r ".tasks[$i].expect[]" "$TASKS")
+  done
 done
 if [ "$CHECK_ONLY" = 0 ]; then
   untracked=$(git ls-files --others --exclude-standard)
@@ -115,20 +149,23 @@ log() { printf 'loop: %s\n' "$*" | tee -a "$state/loop.log" >&2; }
 # and stderr distinct: only stdout can satisfy an expectation.
 run_judge_command() {
   local label=$1 command=$2 rc=0
-  "$TIMEOUT" "$JUDGE_TIMEOUT" bash -c "$command" > "$state/$label.stdout" 2> "$state/$label.stderr" || rc=$?
+  "$TIMEOUT" -k "$KILL_GRACE" "$JUDGE_TIMEOUT" bash -c "$command" > "$state/$label.stdout" 2> "$state/$label.stderr" || rc=$?
   if [ "$rc" = 124 ]; then
     log "$label timed out after ${JUDGE_TIMEOUT}s: $command"
+  elif [ "$rc" = 137 ]; then
+    log "$label killed (exit 137; timeout ignored SIGTERM or SIGKILL): $command"
   elif [ "$rc" != 0 ]; then
     log "$label exited $rc: $command"
   fi
   return "$rc"
 }
 task_passes() {
-  local idx=$1 pattern
+  local idx=$1 k=0 start=${task_expect_starts[$1]} count=${task_expect_counts[$1]}
   run_judge_command "test.$idx" "$(task "$idx" test)" || return 1
-  while IFS= read -r pattern; do
-    grep -qxE -- "$pattern" "$state/test.$idx.stdout" || return 1
-  done < <(jq -r ".tasks[$idx].expect[]" "$TASKS")
+  while [ "$k" -lt "$count" ]; do
+    grep -qxE -- "${task_expect_values[$((start + k))]}" "$state/test.$idx.stdout" || return 1
+    k=$((k + 1))
+  done
 }
 judge() {
   local idx=$1 j
@@ -145,6 +182,18 @@ first_failing() {
   for ((i = 0; i < ntasks; i++)); do task_passes "$i" || { echo "$i"; return; }; done
   echo -1
 }
+# Check-only modes cannot restore or discard, so a judge command that changes
+# the working tree fails the run. Snapshots use a temporary index in .loop/ so
+# the user's staged state is not changed.
+tree_snapshot() {
+  rm -f "$state/check.index"
+  GIT_INDEX_FILE="$state/check.index" git add -A
+  GIT_INDEX_FILE="$state/check.index" git write-tree
+}
+judge_changed_tree() { # $1 = tree snapshot taken before judging
+  [ "$(tree_snapshot)" != "$1" ] || return 1
+  log "judge commands modified the tree"
+}
 # Single pass over a fixed tree: the same commands, timeouts and full-line
 # expectations as the judge, but earlier tasks are not repeated per task.
 if [ "$ONCE" = 1 ]; then
@@ -159,6 +208,7 @@ if [ "$ONCE" = 1 ]; then
       selected+=("$found")
     done
   fi
+  before_tree=$(tree_snapshot)
   bad=0
   if [ -n "$FORMAT_CHECK_CMD" ]; then
     if run_judge_command format_check "$FORMAT_CHECK_CMD"; then r=pass; else r=FAIL; bad=1; fi
@@ -172,23 +222,27 @@ if [ "$ONCE" = 1 ]; then
     if run_judge_command check "$CHECK_CMD"; then r=pass; else r=FAIL; bad=1; fi
     printf '%-5s %s\n' "$r" check
   fi
+  if judge_changed_tree "$before_tree"; then bad=1; fi
   exit "$bad"
 fi
 if [ "$CHECK_ONLY" = 1 ]; then
+  before_tree=$(tree_snapshot)
   bad=0
   for ((i = 0; i < ntasks; i++)); do
     if judge "$i"; then r=pass; else r=FAIL; bad=1; fi
     printf '%-5s %s  %s\n' "$r" "$(task "$i" id)" "$(task "$i" title)"
   done
+  if judge_changed_tree "$before_tree"; then bad=1; fi
   exit "$bad"
 fi
 
 revert_protected() {
-  local f
+  local f changed
+  changed=$({ git diff --name-only HEAD; git ls-files --others --exclude-standard; })
   while IFS= read -r f; do
     [ -n "$f" ] || continue
     if git cat-file -e "HEAD:$f" 2>/dev/null; then git checkout -q HEAD -- "$f"; else rm -f -- "$f"; fi
-  done < <({ git diff --name-only HEAD; git ls-files --others --exclude-standard; } | grep -E -- "$PROTECTED" || true)
+  done < <({ printf '%s\n' "$changed" | grep -E -- "$PROTECTED"; printf '%s\n' "$changed" | grep -Fx -- "$tasks_rel"; } || true)
 }
 commit_attempt() {
   local message=$1 judged_tree=$2
@@ -225,8 +279,9 @@ for ((iter = 1; iter <= MAX_ITER; iter++)); do
   } > "$state/prompt.md"
   log "iter $iter  task $id  attempt $n/$MAX_ATTEMPTS  Coder-Command: $cmd"
   rc=0
-  TASK_ID=$id ATTEMPT=$n "$TIMEOUT" "$ITER_SECONDS" bash -c "$cmd" < "$state/prompt.md" > "$state/coder.$id.$n.log" 2>&1 || rc=$?
+  TASK_ID=$id ATTEMPT=$n "$TIMEOUT" -k "$KILL_GRACE" "$ITER_SECONDS" bash -c "$cmd" < "$state/prompt.md" > "$state/coder.$id.$n.log" 2>&1 || rc=$?
   [ "$rc" = 124 ] && log "coder timed out after ${ITER_SECONDS}s"
+  [ "$rc" = 137 ] && log "coder killed (exit 137; timeout ignored SIGTERM or SIGKILL) after ${ITER_SECONDS}s limit"
   revert_protected
   ok=1
   if [ -n "$FORMAT_CMD" ]; then run_judge_command format "$FORMAT_CMD" || ok=0; fi

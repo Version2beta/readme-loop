@@ -304,11 +304,70 @@ SH
       run --check-once T1; equal "$rc" 1 '--check-once runs kit check'
       contains "$work/output" 'FAIL  check'
       ;;
+    custom-tasks-plus) cheat_custom_tasks 'tasks+v2.json' 'tasks+v2.json';;
+    custom-tasks-dot) cheat_custom_tasks tasks.json './tasks.json';;
+    custom-tasks-absolute) cheat_custom_tasks tasks.json "$PWD/tasks.json";;
+    check-mutation|check-once-mutation)
+      printf 'good\n' > code
+      config '.check = "printf changed > tracked"'
+      printf 'original\n' > tracked; git add -A; git commit -qm 'tracked check target'
+      if [ "$1" = check-once-mutation ]; then run --check-once; else run --check; fi
+      equal "$rc" 1 'check-only mode rejects a tree-changing judge'
+      contains .loop/loop.log 'judge commands modified the tree'
+      ;;
+    timeout-ignores-term)
+      config '.tasks[0].test = "trap \"\" TERM; while :; do sleep 1; done # rl-test-hang"'
+      bounded_run --check-once
+      # A regressed loop can leave a judge that survives the outer deadline.
+      pkill -KILL -f 'rl-test-hang' 2>/dev/null || true
+      equal "$rc" 1 'TERM-ignoring judge is killed and fails'
+      contains .loop/loop.log 'test.0 killed'
+      ;;
+    coder-ignores-term)
+      cat > fake.sh <<'SH'
+#!/usr/bin/env bash
+cat >/dev/null
+trap '' TERM
+while :; do sleep 1; done
+SH
+      git add fake.sh && git commit -qm 'coder ignores TERM'
+      before=$(git rev-list --count HEAD)
+      MAX_ITER=1 ITER_SECONDS=1 bounded_run
+      # A regressed loop can leave the coder behind; remove only this fixture's coder.
+      pkill -KILL -f 'fake.sh cheap' 2>/dev/null || true
+      equal "$rc" 3 'TERM-ignoring coder is killed within the iteration'
+      contains .loop/loop.log 'coder killed'
+      unchanged
+      ;;
+    task-nul)
+      config '.tasks[0].title = "a\u0000b"'
+      run --check-once; equal "$rc" 1 'NUL bytes in task text refused'
+      contains "$work/output" 'may not contain NUL bytes'
+      [ ! -d .loop ] || fail 'state created for NUL-bearing kit'
+      ;;
     *) fail "unknown case $1";;
   esac
 }
 run_empty() { rc=0; env "$1=" bash scripts/loop.sh > "$work/output" 2>&1 || rc=$?; }
-bounded_run() { rc=0; "$outer_timeout" 15 bash scripts/loop.sh > "$work/output" 2>&1 || rc=$?; }
+# -k also kills a judge that ignores TERM, so a regressed loop cannot leak it.
+bounded_run() { rc=0; "$outer_timeout" -k 2 15 bash scripts/loop.sh "$@" > "$work/output" 2>&1 || rc=$?; }
+# A coder with correct code that also edits the kit's task file under a custom
+# spelling. Judging uses the startup metadata, so the attempt passes; the
+# protected file must still be restored, not committed with the attempt.
+cheat_custom_tasks() {
+  local name=$1 spelling=$2
+  if [ "$name" != tasks.json ]; then git mv tasks.json "$name"; git commit -qm 'custom task file'; fi
+  cat > fake.sh <<'SH'
+#!/usr/bin/env bash
+cat >/dev/null
+printf 'good\n' > code
+jq '.tasks[0].expect += ["never matched"]' "$TASKS" > .loop/x.json && mv .loop/x.json "$TASKS"
+SH
+  git add -A && git commit -qm 'coder edits the kit file'
+  rc=0; TASKS=$spelling bash scripts/loop.sh > "$work/output" 2>&1 || rc=$?
+  equal "$rc" 0 "honest code passes under TASKS=$spelling"
+  equal "$(git show "HEAD:$name" | jq -c '.tasks[0].expect')" '["PASS T1"]' "committed task file for $spelling is unchanged"
+}
 mapfile_compat() {
   commands=()
   while IFS= read -r line; do commands+=("${line#*Coder-Command: }"); done < <(grep 'Coder-Command:' .loop/loop.log)
@@ -328,7 +387,7 @@ mutate() {
   [[ $source == *"$old"* ]] || fail "mutation anchor absent: $old"
   source=${source/"$old"/"$new"}
 }
-cases=(search-count notes notes-cross-task judge-writes formatter-protected good formatted protected substring stderr nonzero hang empty-command empty-expect missing-expect legacy untracked defaults hard escalation check-format check-command earlier timeout-format timeout-format-check timeout-check check-once check-once-metadata check-once-select check-once-gates)
+cases=(search-count notes notes-cross-task judge-writes formatter-protected good formatted protected substring stderr nonzero hang empty-command empty-expect missing-expect legacy untracked defaults hard escalation check-format check-command earlier timeout-format timeout-format-check timeout-check check-once check-once-metadata check-once-select check-once-gates custom-tasks-plus custom-tasks-dot custom-tasks-absolute check-mutation check-once-mutation timeout-ignores-term coder-ignores-term task-nul)
 fails=0
 for name in "${cases[@]}"; do
   if bash "$0" --case "$name" "$loop" > "$work/case.log" 2>&1; then
@@ -359,11 +418,14 @@ for name in "${cases[@]}"; do
       mutate '2> "$state/$label.stderr"' '2>&1'
       ;;
     nonzero) mutate '"$(task "$idx" test)" || return 1' '"$(task "$idx" test)" || true';;
-    hang|timeout-*) mutate '"$TIMEOUT" "$JUDGE_TIMEOUT" bash -c "$command"' 'bash -c "$command"';;
+    hang|timeout-*) mutate '"$TIMEOUT" -k "$KILL_GRACE" "$JUDGE_TIMEOUT" bash -c "$command"' 'bash -c "$command"';;
+    coder-ignores-term) mutate '"$TIMEOUT" -k "$KILL_GRACE" "$ITER_SECONDS"' '"$TIMEOUT" "$ITER_SECONDS"';;
+    task-nul) mutate "if jq -e 'any(.tasks[]; ([.id" "if false && jq -e 'any(.tasks[]; ([.id";;
+    custom-tasks-*) mutate 'grep -Fx -- "$tasks_rel"; }' 'true; }';;
+    check-mutation|check-once-mutation) mutate '[ "$(tree_snapshot)" != "$1" ] || return 1' 'return 1';;
     empty-command) mutate '[ -n "${!setting}" ] || die "$setting is empty"' ':';;
     empty-expect|missing-expect)
-      mutate 'die "task $id: expect must be a nonempty list of full-line regular expressions"' ':'
-      mutate '.expect[]"' '.expect[]?"'
+      mutate 'if [ -n "$bad_expect" ]; then' 'if false; then'
       ;;
     legacy) mutate 'die "pass_marker is obsolete; use tasks[].expect full-line regular expressions"' ':';;
     untracked)

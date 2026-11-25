@@ -383,11 +383,13 @@ the kit's language/check tools. Do not install prerequisites without permission.
   must not mutate the accepted source tree. `--check-once [ID...]` runs
   `format_check`, the selected (default all) tasks and `check` once each,
   printing `pass`/`FAIL` lines; unknown ids are an error. It never commits or
-  discards and does not replace `--check` for stage acceptance.
+  discards and does not replace `--check` for stage acceptance. Both check-only
+  modes fail when judge commands change the working tree.
 - Limits: `MAX_ITER=60`, `MAX_ATTEMPTS=4`, `ITER_SECONDS=1200`,
   `JUDGE_TIMEOUT=300`. Owner environment overrides must be positive integers.
   Every formatter, format check, task test (including diagnostic probes) and
-  kit check is timed. Timeouts fail attempts and log the command. The runner
+  kit check is timed. Timeouts fail attempts and log the command; a command
+  that ignores SIGTERM is killed 5 seconds after its timeout. The runner
   stops at all tasks passing, a task's attempt limit (`STOP` names it), or the
   iteration cap; partial progress is not completion.
 
@@ -473,11 +475,13 @@ Approve the next layer inline, then prepare and reverify the next kit.
 ## Local maintenance checks
 
 After inspecting the scripts, run `bash scripts/test_loop.sh` for the inherited
-fake-coder regression suite (30 cases and deliberate mutations). Optionally run
+fake-coder regression suite (38 cases and deliberate mutations). Optionally run
 `bash tests/run.sh` for the inherited Go toy kit; it also requires Go and Perl.
 Both use disposable fixture Git repositories only, never a real kit or model.
 Keep these tests and the local runner self-contained. Compare runner and format
 bytes with the recorded source before claiming unchanged reuse; the runner now
-differs from spec-loop by `--check-once` and fixed-task metadata caching. Installation,
+differs from spec-loop by `--check-once`, fixed-task metadata and expectation
+caching, check-only tree-change detection, exact task-file protection, and
+kill-after timeouts. Installation,
 startup discovery and a live workflow trial are separate checks, not implied by
 these packaging tests.
