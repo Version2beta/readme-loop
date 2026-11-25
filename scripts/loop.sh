@@ -145,6 +145,9 @@ $untracked"
   [ -z "$(git status --porcelain)" ] || die "working tree is dirty"
   branch=$(git rev-parse --abbrev-ref HEAD)
   case $branch in main|master|HEAD) die "run on a branch, not $branch";; esac
+  # Protected-path matching and restoration use paths relative to the repository top,
+  # and the kit files are read from the current directory: start only at the top.
+  [ -z "$(git rev-parse --show-prefix)" ] || die "run from the repository top level, not a subdirectory"
 fi
 state=.loop
 git check-ignore -q "$state/x" || die "add .loop/ to .gitignore"
@@ -155,18 +158,26 @@ log() { printf 'loop: %s\n' "$*" | tee -a "$state/loop.log" >&2; }
 # the user set, because the clean-start gate could not see the tree. A coder run
 # that sets flags is cleared before anything reads the tree (clear_index_flags).
 # With both flags set, ls-files -v prints a lowercase s, so s must be matched too.
-refresh_index_flags() { git ls-files -v -z | tr '\0' '\n' > "$state/index-flags"; }
-index_flag_paths() { sed -n -e 's/^[hsS] //p' "$state/index-flags"; }
+# Names stay NUL-delimited: a line-based listing split a name containing a newline,
+# so its flag was missed. grep -z selects the flagged records ("h path", "s path",
+# "S path"). Its ^ can also match after a newline inside a name, which can report a
+# flag that is not set (a refusal or a failed attempt); it cannot miss a real flag.
+refresh_index_flags() { git ls-files -v -z > "$state/index-flags"; }
+index_flag_records() { # flagged records, NUL-delimited, to stdout
+  local rc=0
+  LC_ALL=C grep -azE '^[hsS] ' "$state/index-flags" || rc=$?
+  [ "$rc" -le 1 ] || return 1 # 1 means that no entry is flagged
+}
 clear_index_flags() {
-  local path
+  local rec
   refresh_index_flags || return 1
-  index_flag_paths > "$state/index-paths"
-  while IFS= read -r path; do
-    log "clearing index flag set during the attempt on $path"
+  index_flag_records > "$state/index-flagged" || return 1
+  while IFS= read -r -d '' rec; do
+    log "clearing index flag set during the attempt on ${rec:2}"
     # One flag per call: git applies only the last mark option given in one invocation.
-    git update-index --no-assume-unchanged -- "$path" || return 1
-    git update-index --no-skip-worktree -- "$path" || return 1
-  done < "$state/index-paths"
+    git update-index --no-assume-unchanged -- "${rec:2}" || return 1
+    git update-index --no-skip-worktree -- "${rec:2}" || return 1
+  done < "$state/index-flagged"
 }
 # Ignored files: NUL-delimited, sorted paths git ignores (excluding the loop state),
 # and the ones created since the attempt began. -z keeps names raw; without it git
@@ -209,8 +220,9 @@ zero_count() { tr -cd '\0' < "$1" | wc -c | tr -d ' '; }
 zero_names() { tr '\0' '\n' < "$1" | head -n 5 | tr '\n' ' '; }
 if [ "$CHECK_ONLY" = 0 ]; then
   refresh_index_flags || die "could not read the git index"
-  [ -z "$(index_flag_paths)" ] || die "index flags hide edits from git (assume-unchanged or skip-worktree); clear them first:
-$(index_flag_paths)"
+  index_flag_records > "$state/index-flagged" || die "could not read the git index"
+  [ ! -s "$state/index-flagged" ] || die "index flags hide edits from git (assume-unchanged or skip-worktree); clear them first:
+$(tr '\0' '\n' < "$state/index-flagged")"
 fi
 
 # All judge commands (including diagnostic probes) are bounded. Keep stdout
@@ -337,6 +349,9 @@ revert_protected() {
     log "restoring .gitignore: $state/ must stay ignored"
     if git cat-file -e "HEAD:.gitignore" 2>/dev/null; then git checkout -q HEAD -- .gitignore; else rm -f -- .gitignore; fi
   fi
+  # Restoring .gitignore may not be enough: a rule elsewhere (such as .git/info/exclude)
+  # can still hide the state directory. Stop before anything is judged or committed.
+  git check-ignore -q "$state/x" || die "$state/ is still not ignored after restoring .gitignore (check .git/info/exclude); stopping"
 }
 # Restoration happens before the snapshot, so a protected write that lands in
 # between (a surviving descendant) would be judged and committed. Refuse instead.
@@ -408,11 +423,18 @@ for ((iter = 1; iter <= MAX_ITER; iter++)); do
   # The formatter and judge commands can set index flags, which hide their edits from
   # the snapshot below. Any flag set since the coder fails the attempt; then clear them.
   refresh_index_flags || die "could not read the git index"
-  if [ -n "$(index_flag_paths)" ]; then log "index flags set during the attempt; attempt fails"; ok=0; fi
+  index_flag_records > "$state/index-flagged" || die "could not read the git index"
+  if [ -s "$state/index-flagged" ]; then log "index flags set during the attempt; attempt fails"; ok=0; fi
   clear_index_flags || die "could not clear index flags"
   git add -A
   if [ "$(git write-tree)" != "$judged_tree" ]; then
     log "judge commands modified the tree"
+    ok=0
+  fi
+  # A pass that leaves the tree unchanged has nothing to commit (for example, a flaky
+  # test). It fails the attempt rather than stopping the run on git's error.
+  if [ "$ok" = 1 ] && [ "$judged_tree" = "$(git rev-parse HEAD^{tree})" ]; then
+    log "judge passed with no change to commit; attempt fails"
     ok=0
   fi
   if [ "$ok" = 1 ]; then

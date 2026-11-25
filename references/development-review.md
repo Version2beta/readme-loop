@@ -222,6 +222,95 @@ not run; not run as root; no live coder and no model call. The fixtures were in
   the clean-start gate refuse any real run in this checkout. It was not added, ignored
   or moved. Whether to ignore or move it is an owner decision.
 
+## Third continuation from `3473942`: review-4 findings
+
+Source: the read-only review of the continuation head (private result
+`continuation/runner-review-4.json`; its verdict and finding text were read, and
+no other fields). The reviewer ran no commands and made no edits, and it is of the
+same model family as the writer. It is an input to this work, not an independent
+review of the changes below. Its findings were treated as hypotheses. Each was
+reproduced first on the HEAD runner (`3473942` `scripts/loop.sh`, the same bytes as
+the second continuation's final file, SHA-256 `9b4d6053…`) in disposable fixtures
+under `/tmp/rl-exp4`, with a scripted fake coder and no model. Each new regression
+case was also run on the HEAD runner and fails there for its stated reason.
+
+| # | Finding | Reproduced on `3473942` | Disposition |
+| --- | --- | --- | --- |
+| R1 (rated low) | Index flag on a tracked file whose name starts with a newline is missed. The `ls-files -v` listing was split into lines; `sed` printed an empty path; `update-index -- ""` printed `Ignoring path` and exited 0, so the flag stayed. Startup did not refuse (rc 2 after three attempts, not rc 1). An attempt that set the flag and edited the file passed (`T1 passed`) and committed, while the committed `\nverify.sh` still said `exit 1`. | **Yes, and worse than rated:** the commit passes while its own protected test fails. | **Fixed.** Names are read NUL-delimited (`grep -azE` on `ls-files -v -z`); the startup, clear and judge checks use those records. Cases `newline-index-flag-startup` and `newline-index-flag`. |
+| R2 | After `.gitignore` is restored, nothing confirms that `.loop/` is still ignored. A rule outside `.gitignore` (here `.git/info/exclude`) keeps hiding it. | **Yes.** With the exclude rule removed, the restore did nothing, `git clean -fd` deleted `.loop/` (its `loop.log` was lost), and the run died with `could not list ignored files` (rc 1). Nothing was committed. | **Fixed.** A check right after restoration stops the run, with state kept, before anything is judged or committed. Case `ignore-rule-outside`. |
+| R3 (hypothesis 1) | A judge that passes with no change to commit makes `git commit` fail with `nothing to commit`. The run exits 1 and logs nothing about the attempt. | **Yes.** rc 1, no commit, no pass or failure line. | **Fixed.** A pass whose judged tree equals HEAD is logged as a failed attempt, so it counts toward `MAX_ATTEMPTS`. Case `empty-pass`. This is a choice; decision 17. |
+| R4 (hypothesis 2) | A run started in a subdirectory: protected-path listings and pathspecs are relative to the current directory. | **Yes, but fail-closed.** An untracked protected root file (`loop.sh`) was refused by `protected_in_tree` (rc 3, no commit). A modified tracked protected root file (`SPEC.md`) made restoration fail (rc 1, no commit, the edit left in the worktree). | **Fixed.** A run not at the repository top level is refused at startup, before any state is created. Case `subdir-start`. Check-only modes are not affected. |
+| R5 (hypothesis 3) | A protected file written and restored within the judge window is invisible to the end-state comparison. | Not reproduced. This is the window that decision 14 option (c) would close. | **Not changed.** Decision 18. |
+| R6 (hypothesis 4) | A surviving descendant can write after a timeout. | Not re-tested here. | **Not changed.** Deferred decision 2. |
+| R7 (hypothesis 5) | `10#` on a very long count overflows: in bash 3.2, `99999999999999999999 + 1` evaluates to `-8446744073709551616`. | Arithmetic checked; the loop was not run with that state. | **Not changed.** The counter is in the coder-writable `.loop/` (decision 8), and the coder can already write `0`, which resets escalation. The overflow adds no new effect. |
+
+Behaviour changes a reader should know about:
+
+- Startup refuses a run started outside the repository top level.
+- A file whose name starts with a newline is refused at startup when its index flag
+  is set, and cleared during an attempt like any other flagged file.
+- A pass that leaves the tree unchanged is a failed attempt, not a stop with a git error.
+- If `.loop/` is still not ignored after `.gitignore` is restored, the run stops (with
+  its state kept) instead of deleting `.loop/` through `git clean`.
+
+Known limit (not tested): a name that contains a newline followed by `h`, `s` or `S`
+and a space can be reported as flagged when it is not. The effect is a startup
+refusal or a failed attempt. It never lets a change pass, and it never misses a real
+flag.
+
+### Performance (third continuation)
+
+Attempt path: one passing attempt with a fake coder (`/tmp/rl-exp4/perf4.sh`, not
+committed), disposable repositories, three runs each, `maintenance` default. The
+machine was shared with an unrelated loop process (load average about 3.5), so these
+numbers are indicative only.
+
+| Ignored files | `3473942` (s) | Working tree (s) | Difference (median) |
+| ---: | --- | --- | ---: |
+| 0 | 0.300, 0.299, 0.301 | 0.327, 0.325, 0.323 | about +0.025 s |
+| 20,000 | 0.431, 0.450, 0.451 | 0.471, 0.483, 0.452 | about +0.02 s |
+
+The added work per attempt is two `git check-ignore` calls (one per restoration), one
+`git rev-parse` for the no-change test, and an index-flag listing scanned with `grep -z`
+instead of `sed`. At startup there is one `git rev-parse --show-prefix`. Check-only
+modes do not run the new startup guard, the flag clearing or the restoration, so they
+are unchanged by construction; they were not timed. Not measured: coder time,
+application test time, ignored trees larger than 20,000 files, and Linux.
+
+### Validation (third continuation, observed in this session)
+
+- Baseline before any edit: `scripts/test_loop.sh` at `3473942` run from a scratch copy
+  of the HEAD `scripts/loop.sh` and `scripts/test_loop.sh`: **63/63 cases, 63/63 regressions, exit 0** (19 min 38 s; `/tmp/rl-exp4/suite-baseline.log`).
+- Final: `bash scripts/test_loop.sh` on the working tree: **68/68 cases passed, 68/68
+  regressions caught, exit 0**, 23 min 32 s wall time (`/tmp/rl-exp4/suite-full.log`).
+- The five new cases fail on the HEAD runner for their stated reasons: `newline-index-flag-startup`
+  (rc 0, expected 1), `newline-index-flag` (rc 0, expected 2: the committed test fails),
+  `ignore-rule-outside` (no "still not ignored" message), `empty-pass` (rc 1, expected 3),
+  `subdir-start` (rc 2, expected 1). Each passes on the fixed runner.
+- Each new case has a mutant (the old behaviour re-introduced in a disposable copy); every
+  mutant is caught. The three existing index-flag mutants were repointed to the new code.
+- `tests/run.sh` (Go toy kit, `GOPROXY=off`, `GOTOOLCHAIN=local`, temporary `GOCACHE` and
+  `GOMODCACHE`): 13 `ok`, exit 0.
+- `python3 -I tests/test_install.py`, `tests/test_kit_format.py`, `tests/test_runner_config.py`: OK each.
+- `bash -n` and `/bin/bash -n` on `scripts/loop.sh`, `scripts/test_loop.sh`, `scripts/install.sh`,
+  `tests/run.sh`, `tests/fakecoder.sh`: passed. `git diff --check`: clean.
+
+Environment limits: macOS `/bin/bash` 3.2.57 (arm64) only; BSD `grep -z`; GNU `grep`,
+GNU `timeout` and Linux were not run; not run as root; no live coder, no kit and no model call.
+Only the fake coder in `/tmp` fixtures was used.
+
+### Third continuation: open items
+
+- **Decision 17 (new).** Should a pass that leaves the tree unchanged count as a failed
+  attempt (current, R3), or end the run as complete because the task already passes?
+  Owner choice.
+- **Decision 18 (new).** Should judging also detect protected writes made and restored
+  within the judge window (R5)? Options as in decision 14 (c): judge in a clean export,
+  or accept the gap.
+- Review-4's reviewer and this writer are the same model family. No independent review
+  of this commit has been run. The findings it raised are answered here, not verified by
+  an independent reviewer.
+
 ## Runner investigation (round one, unchanged)
 
 Each item was reproduced first in disposable fixtures with the unmodified runner
@@ -465,6 +554,8 @@ case is valid for this user); no live coder, no live kit, no model calls. The
 14. **New (M2a, open policy).** May a passing attempt be judged on ignored files that its commit does not contain? Current: yes, with a warning in `.loop/loop.log`. The options are: (a) refuse a pass that creates ignored files, which would block coders whose own test runs create caches such as `__pycache__`; (b) allow a list of cache paths named by the owner and refuse other ignored files; (c) judge in a clean export of the committed tree, which changes what the judge sees and costs time. Related: decision 9 (`.gitignore` is not protected by default).
 15. **New.** A discarded attempt removes ignored files it created, but does not restore pre-existing ignored files it modified or deleted in place. Options: keep a content copy of ignored files (cost grows with their size) or accept the gap.
 16. **New (second continuation).** An attempt-mode git failure while snapshotting (finding 6) stops the run with the attempt's changes left in the worktree. Discarding them automatically is the alternative; it changes the attempt-discard policy (decision 6). Owner choice.
+17. **New (third continuation).** Should a pass that leaves the tree unchanged count as a failed attempt (current; R3), or end the run as complete because the task already passes? Owner choice.
+18. **New (third continuation).** Should judging detect protected writes made and restored within the judge window (R5)? Options as in decision 14 (c). Owner choice.
 
 ## Source state
 
@@ -479,6 +570,7 @@ case is valid for this user); no live coder, no live kit, no model calls. The
   `SKILL.md` `052009200d3fdeb55518d983c6283562ad470a5dcbc3c9eda49143f441ec504b`;
   `README.md` `f6dfd0774e309c08302c81828c75404b442a3bc2fce575e00967bebfc9622e6a`.
 - Baseline `scripts/loop.sh` SHA-256 at `a1f9daa`: `232a5c0a35496f10e791ab164f0a12b9760e9260025017252d53f9bb6f7097a1`.
+- Third continuation (base `3473942`, final files): `scripts/loop.sh` `0fe0f14b13c12e0a2b19295f55147c444db5390ac7fab9e9b24e7616d2021e64`; `scripts/test_loop.sh` `3e97dc7fe4f93ceb4002704f019904f1eeed705f8f2240748d9e4a2c69549a2f`. Changed: `scripts/loop.sh`, `scripts/test_loop.sh`, `SKILL.md`, `README.md` (count only), this report.
 - Untracked `ARTICLE-DRAFT.md` left untouched and not committed.
 - Not merged to `main`; pending independent review. No remote operation.
 

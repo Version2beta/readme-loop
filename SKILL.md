@@ -375,6 +375,8 @@ the kit's language/check tools. Do not install prerequisites without permission.
   Protected matching uses NUL-delimited Git paths with rename detection off, so
   quoted (non-ASCII) or renamed names cannot escape restoration. If a coder breaks
   the `.loop/` ignore rule, `.gitignore` is restored from HEAD before snapshots.
+  If `.loop/` is still not ignored after that (for example, because a rule in
+  `.git/info/exclude` was removed), the run stops before judging or committing anything.
   Each task requires exit 0 and every `expect` matching a complete stdout line;
   stderr cannot satisfy it. Empty/missing expectations are task-named kit errors,
   as is any expectation containing a newline (each must be one full-line regex).
@@ -382,10 +384,17 @@ the kit's language/check tools. Do not install prerequisites without permission.
   both together) has the flag cleared, and the file restored if protected, before
   any path is read. Without this, git would hide the edit from restoration and
   from the commit. A flag set by the formatter or a judge command fails the
-  attempt: the flag is cleared, and the discard restores protected files.
+  attempt: the flag is cleared, and the discard restores protected files. Names
+  are read NUL-delimited, so a file whose name contains a newline is refused at
+  startup and cleared during an attempt like any other. A name containing a
+  newline and then `h`, `s` or `S` and a space can be reported as flagged when it
+  is not: the run is refused or the attempt fails, never passed.
+- A run must start at the repository top level, not in a subdirectory; it is
+  refused otherwise, before any state is created.
 - Reject judge commands that change the tree. A pass commits exactly the judged
   tree with no intervening changes or rewriting commit hooks and asserts a
-  clean checkout. `git add -A` includes legitimate attempt-created new files.
+  clean checkout. A pass that leaves the tree unchanged is a failed attempt, not a
+  commit. `git add -A` includes legitimate attempt-created new files.
   Ignored files are not part of that tree. Ignored files created by the attempt
   that match a protected pattern are removed before judging. Other ignored files
   created by the attempt are logged as not committed, but kept after a pass. Whether
@@ -500,7 +509,7 @@ Approve the next layer inline, then prepare and reverify the next kit.
 ## Local maintenance checks
 
 After inspecting the scripts, run `bash scripts/test_loop.sh` for the inherited
-fake-coder regression suite (63 cases and deliberate mutations). Optionally run
+fake-coder regression suite (68 cases and deliberate mutations). Optionally run
 `bash tests/run.sh` for the inherited Go toy kit; it also requires Go and Perl.
 Both use disposable fixture Git repositories only, never a real kit or model.
 Keep these tests and the local runner self-contained. Compare runner and format
@@ -508,6 +517,6 @@ bytes with the recorded source before claiming unchanged reuse; the runner now
 differs from spec-loop by `--check-once`, fixed-task metadata and expectation
 caching, check-only tree-change detection, exact task-file protection,
 NUL-delimited rename-free protected matching, `.loop/` ignore-rule restoration,
-index-flag clearing, removal of ignored files on discard, and kill-after timeouts. Installation,
+index-flag clearing (NUL-delimited, so newline names are included), removal of ignored files on discard, kill-after timeouts, a stop when `.loop/` is still unignored after restoration, top-level-only starts, and no-change passes treated as failed attempts. Installation,
 startup discovery and a live workflow trial are separate checks, not implied by
 these packaging tests.

@@ -652,6 +652,79 @@ SH
       contains .loop/notes.T1 '++ note about the output'
       if grep -q 'PROGRESS.md' .loop/notes.T1; then fail 'diff header leaked into the notes'; fi
       ;;
+    newline-index-flag-startup)
+      # A tracked file whose name starts with a newline is refused when its index flag is set.
+      nlf=$(printf '\nnl.txt'); printf 'x\n' > "$nlf"; git add -A && git commit -qm 'newline-named file'
+      git update-index --assume-unchanged "$nlf"
+      run; equal "$rc" 1 'startup refuses an index flag on a newline-named file'
+      contains "$work/output" 'index flags hide edits'
+      ;;
+    newline-index-flag)
+      # The coder hides a protected file whose name starts with a newline, then edits it to pass.
+      # The flag must be cleared and the edit discarded: the judge may not pass on it.
+      nlf=$(printf '\nverify.sh')
+      git rm -q verify.sh; printf 'exit 1\n' > "$nlf"; git add -A && git commit -qm 'newline-named protected test'
+      config '.tasks[0].test = "bash ./*verify.sh" | .protected = ["verify\\.sh"]'
+      cat > fake.sh <<'SH'
+#!/usr/bin/env bash
+cat >/dev/null
+p=$(printf '\nverify.sh')
+git update-index --assume-unchanged "$p"
+printf 'echo PASS T1\n' > "$p"
+printf 'honest\n' > feature.txt
+SH
+      git add fake.sh && git commit -qm 'coder hides a newline-named test with a flag'
+      before=$(git rev-list --count HEAD)
+      run; equal "$rc" 2 'cheat through a newline-named index flag ends in STOP'
+      unchanged
+      equal "$(git show "HEAD:$nlf")" 'exit 1' 'newline-named protected file unchanged in HEAD'
+      equal "$(cat "$nlf")" 'exit 1' 'newline-named protected file restored in the worktree'
+      flagged=$(git ls-files -v -z | LC_ALL=C grep -azE '^[hsS] ' | tr -d '\0' || true)
+      equal "$flagged" '' 'no index flag left set'
+      contains .loop/loop.log 'clearing index flag set during the attempt on'
+      if grep -q 'every task passes' "$work/output"; then fail 'loop passed on a hidden edit'; fi
+      ;;
+    ignore-rule-outside)
+      # A rule outside .gitignore (here .git/info/exclude) can keep hiding .loop/ after
+      # .gitignore is restored. The run must stop before judging or committing the state.
+      printf 'ignored/\n' > .gitignore; git add -A && git commit -qm 'gitignore without .loop/'
+      printf '.loop/\n' >> .git/info/exclude
+      cat > fake.sh <<'SH'
+#!/usr/bin/env bash
+cat >/dev/null
+grep -v '^\.loop/' .git/info/exclude > .git/info/exclude.new && mv .git/info/exclude.new .git/info/exclude
+printf 'good\n' > code
+SH
+      git add fake.sh && git commit -qm 'coder removes the exclude rule'
+      before=$(git rev-list --count HEAD)
+      run; equal "$rc" 1 'a state directory that stays unignored stops the run'
+      contains "$work/output" 'still not ignored after restoring .gitignore'
+      unchanged
+      [ -f .loop/loop.log ] || fail 'loop state was deleted'
+      [ -z "$(git ls-tree -r --name-only HEAD | grep '^\.loop/' || true)" ] || fail '.loop/ state was committed'
+      ;;
+    empty-pass)
+      # A judge pass that leaves the tree unchanged is a failed attempt, not a git error.
+      config '.tasks[0].test = "if [ -f .loop/seen ]; then echo PASS T1; else touch .loop/seen; echo FAIL T1; fi"'
+      printf '#!/usr/bin/env bash\ncat >/dev/null\n' > fake.sh
+      git add fake.sh && git commit -qm 'coder makes no change'
+      before=$(git rev-list --count HEAD)
+      MAX_ITER=1 run; equal "$rc" 3 'a no-change pass stops at the iteration cap, not on a git error'
+      contains .loop/loop.log 'judge passed with no change to commit; attempt fails'
+      unchanged
+      ;;
+    subdir-start)
+      # Protected-path matching and restoration use the repository top: start there only.
+      mkdir -p sub; cp PROMPT.md sub/PROMPT.md; git add -A && git commit -qm 'subdirectory prompt'
+      before=$(git rev-list --count HEAD)
+      cd sub
+      rc=0; TASKS=../tasks.json bash ../scripts/loop.sh > "$work/output" 2>&1 || rc=$?
+      cd "$work/repo"
+      equal "$rc" 1 'a run started in a subdirectory is refused'
+      contains "$work/output" 'run from the repository top level'
+      [ ! -d sub/.loop ] || fail 'state created in the subdirectory'
+      unchanged
+      ;;
     *) fail "unknown case $1";;
   esac
 }
@@ -694,7 +767,7 @@ mutate() {
   [[ $source == *"$old"* ]] || fail "mutation anchor absent: $old"
   source=${source/"$old"/"$new"}
 }
-cases=(search-count notes notes-cross-task judge-writes formatter-protected good formatted protected substring stderr nonzero hang empty-command empty-expect missing-expect legacy untracked defaults hard escalation check-format check-command earlier timeout-format timeout-format-check timeout-check check-once check-once-metadata check-once-select check-once-gates custom-tasks-plus custom-tasks-dot custom-tasks-absolute check-mutation check-once-mutation timeout-ignores-term coder-ignores-term task-nul empty-override blank-command newline-expect rename-protected quoted-protected gitignore-edit coder-timeout protected-window check-untracked unreadable-snapshot index-flags index-flags-skip index-flag-startup index-flags-both index-flag-both-startup judge-flag ignored-discard ignored-pass-warning ignored-protected quoted-discard newline-discard plusplus-note attempts-corrupt blank-kit-command glob-pathspec)
+cases=(search-count notes notes-cross-task judge-writes formatter-protected good formatted protected substring stderr nonzero hang empty-command empty-expect missing-expect legacy untracked defaults hard escalation check-format check-command earlier timeout-format timeout-format-check timeout-check check-once check-once-metadata check-once-select check-once-gates custom-tasks-plus custom-tasks-dot custom-tasks-absolute check-mutation check-once-mutation timeout-ignores-term coder-ignores-term task-nul empty-override blank-command newline-expect rename-protected quoted-protected gitignore-edit coder-timeout protected-window check-untracked unreadable-snapshot index-flags index-flags-skip index-flag-startup index-flags-both index-flag-both-startup judge-flag ignored-discard ignored-pass-warning ignored-protected quoted-discard newline-discard plusplus-note attempts-corrupt blank-kit-command glob-pathspec newline-index-flag-startup newline-index-flag ignore-rule-outside empty-pass subdir-start)
 fails=0
 for name in "${cases[@]}"; do
   if bash "$0" --case "$name" "$loop" > "$work/case.log" 2>&1; then
@@ -749,7 +822,7 @@ for name in "${cases[@]}"; do
       mutate '[ "$rc" = 137 ] && log "coder killed (exit 137; timeout ignored SIGTERM or SIGKILL) after ${ITER_SECONDS}s limit"
   clear_index_flags || die "could not clear index flags"' '[ "$rc" = 137 ] && log "coder killed (exit 137; timeout ignored SIGTERM or SIGKILL) after ${ITER_SECONDS}s limit"
   :';;
-    index-flag-startup) mutate '[ -z "$(index_flag_paths)" ] || die' 'true || die';;
+    index-flag-startup) mutate '[ ! -s "$state/index-flagged" ] || die' 'true || die';;
     ignored-discard) mutate 'while IFS= read -r -d '"''"' f; do rm -f -- "$f"; done < "$state/ignored.new"' ':';;
     ignored-pass-warning) mutate 'if [ -s "$state/ignored.new" ]; then
       log "warning:' 'if false; then
@@ -760,8 +833,8 @@ for name in "${cases[@]}"; do
       ;;
     blank-kit-command) mutate '(type == "string" and test("\\S"))' '(type == "string")';;
     glob-pathspec) mutate 'git checkout -q HEAD -- ":(literal)$f"' 'git checkout -q HEAD -- "$f"';;
-    index-flags-both|index-flag-both-startup) mutate 's/^[hsS] //p' 's/^[hS] //p';;
-    judge-flag) mutate 'if [ -n "$(index_flag_paths)" ]; then log "index flags set during the attempt; attempt fails"; ok=0; fi' ':';;
+    index-flags-both|index-flag-both-startup) mutate "LC_ALL=C grep -azE '^[hsS] '" "LC_ALL=C grep -azE '^[hS] '";;
+    judge-flag) mutate 'if [ -s "$state/index-flagged" ]; then log "index flags set during the attempt; attempt fails"; ok=0; fi' ':';;
     ignored-protected) mutate 'log "removing protected ignored file created by the attempt: $f"; rm -f -- "$f"' ':';;
     quoted-discard|newline-discard) mutate "git ls-files -z -o -i --exclude-standard -- ':(exclude).loop' | LC_ALL=C sort -z" "git ls-files -o -i --exclude-standard -- ':(exclude).loop' | tr '\n' '\0' | LC_ALL=C sort -z";;
     plusplus-note) mutate 'hunk && /^\+/' '/^\+\+\+/ {next} /^\+/';;
@@ -789,6 +862,11 @@ $untracked"' ':'
       mutate '    if run_judge_command format_check "$FORMAT_CHECK_CMD"; then r=pass' '    if true; then r=pass'
       mutate '    if run_judge_command check "$CHECK_CMD"; then r=pass' '    if true; then r=pass'
       ;;
+    newline-index-flag-startup) mutate '[ ! -s "$state/index-flagged" ] || die' "[ -z \"\$(tr '\\0' '\\n' < \"\$state/index-flagged\" | sed -n -e 's/^[hsS] //p')\" ] || die";;
+    newline-index-flag) mutate "LC_ALL=C grep -azE '^[hsS] ' \"\$state/index-flags\" || rc=\$?" "tr '\\0' '\\n' < \"\$state/index-flags\" | sed -n -e 's/^[hsS] //p' | tr '\\n' '\\0' || rc=\$?";;
+    ignore-rule-outside) mutate 'git check-ignore -q "$state/x" || die "$state/ is still not ignored after restoring .gitignore (check .git/info/exclude); stopping"' ':';;
+    empty-pass) mutate 'if [ "$ok" = 1 ] && [ "$judged_tree" = "$(git rev-parse HEAD^{tree})" ]; then' 'if false; then';;
+    subdir-start) mutate '[ -z "$(git rev-parse --show-prefix)" ] || die "run from the repository top level, not a subdirectory"' ':';;
   esac
   printf '%s\n' "$source" > "$work/regressed.sh"
   if bash "$0" --case "$name" "$work/regressed.sh" > "$work/mutation.log" 2>&1; then
