@@ -154,8 +154,9 @@ log() { printf 'loop: %s\n' "$*" | tee -a "$state/loop.log" >&2; }
 # Such a file vanishes from status, add, diff and checkout. Startup refuses flags
 # the user set, because the clean-start gate could not see the tree. A coder run
 # that sets flags is cleared before anything reads the tree (clear_index_flags).
+# With both flags set, ls-files -v prints a lowercase s, so s must be matched too.
 refresh_index_flags() { git ls-files -v -z | tr '\0' '\n' > "$state/index-flags"; }
-index_flag_paths() { sed -n -e 's/^[hS] //p' "$state/index-flags"; }
+index_flag_paths() { sed -n -e 's/^[hsS] //p' "$state/index-flags"; }
 clear_index_flags() {
   local path
   refresh_index_flags || return 1
@@ -167,14 +168,45 @@ clear_index_flags() {
     git update-index --no-skip-worktree -- "$path" || return 1
   done < "$state/index-paths"
 }
-# Ignored files: sorted paths git ignores (excluding the loop state), and the
-# ones created since the attempt began. Removing them on discard is what keeps
-# a discarded attempt's artifacts from satisfying a later judge.
-list_ignored() { git ls-files -o -i --exclude-standard | sed -e '/^\.loop\//d' | LC_ALL=C sort > "$1"; }
+# Ignored files: NUL-delimited, sorted paths git ignores (excluding the loop state),
+# and the ones created since the attempt began. -z keeps names raw; without it git
+# quotes non-ASCII and special names, and the quoted text cannot be removed.
+# Removing the new ones on discard keeps a discarded attempt's artifacts from
+# satisfying a later judge.
+list_ignored() { git ls-files -z -o -i --exclude-standard -- ':(exclude).loop' | LC_ALL=C sort -z > "$1"; }
+# zero_difference BEFORE AFTER OUT: entries of the sorted list AFTER that are absent
+# from the sorted list BEFORE, NUL-delimited. comm is exact only when no name
+# contains a newline, so that case takes the fast path; otherwise a bash merge
+# (slower per entry, but exact) compares the NUL-delimited records.
+zero_difference() {
+  local b a have_b=0 have_a=0 LC_ALL=C
+  if [ "$(cat "$1" "$2" | tr -cd '\n' | wc -c)" -eq 0 ]; then
+    LC_ALL=C comm -13 <(tr '\0' '\n' < "$1") <(tr '\0' '\n' < "$2") | tr '\n' '\0' > "$3"
+    return
+  fi
+  : > "$3"
+  exec 3< "$1" 4< "$2" || return 1
+  if IFS= read -r -d '' b <&3; then have_b=1; fi
+  if IFS= read -r -d '' a <&4; then have_a=1; fi
+  while [ "$have_a" = 1 ]; do
+    if [ "$have_b" = 1 ] && [[ $b < $a ]]; then
+      if IFS= read -r -d '' b <&3; then have_b=1; else have_b=0; fi
+    elif [ "$have_b" = 1 ] && [ "$b" = "$a" ]; then
+      if IFS= read -r -d '' a <&4; then have_a=1; else have_a=0; fi
+    else
+      printf '%s\0' "$a" >> "$3"
+      if IFS= read -r -d '' a <&4; then have_a=1; else have_a=0; fi
+    fi
+  done
+  exec 3<&- 4<&-
+}
 ignored_since_attempt() {
   list_ignored "$state/ignored.after" || return 1
-  LC_ALL=C comm -13 "$state/ignored.before" "$state/ignored.after" > "$state/ignored.new"
+  zero_difference "$state/ignored.before" "$state/ignored.after" "$state/ignored.new"
 }
+# Log helpers for NUL-delimited lists: count, and the first few names.
+zero_count() { tr -cd '\0' < "$1" | wc -c | tr -d ' '; }
+zero_names() { tr '\0' '\n' < "$1" | head -n 5 | tr '\n' ' '; }
 if [ "$CHECK_ONLY" = 0 ]; then
   refresh_index_flags || die "could not read the git index"
   [ -z "$(index_flag_paths)" ] || die "index flags hide edits from git (assume-unchanged or skip-worktree); clear them first:
@@ -291,6 +323,14 @@ revert_protected() {
       if git cat-file -e "HEAD:$f" 2>/dev/null; then git checkout -q HEAD -- ":(literal)$f"; else rm -f -- "$f"; fi
     fi
   done < "$state/paths"
+  # Ignored files are not in the listing above. Remove the protected ones this
+  # attempt created, so the judge cannot pass on a file the commit does not contain.
+  ignored_since_attempt || die "could not list ignored files"
+  while IFS= read -r -d '' f; do
+    if grep -qE -- "$PROTECTED" <<< "$f" || [ "$f" = "$tasks_rel" ]; then
+      log "removing protected ignored file created by the attempt: $f"; rm -f -- "$f"
+    fi
+  done < "$state/ignored.new"
   # The loop's state directory must stay ignored, or later git add/clean would
   # stage its logs or delete them. Restore the ignore file if a coder broke it.
   if ! git check-ignore -q "$state/x"; then
@@ -365,6 +405,11 @@ for ((iter = 1; iter <= MAX_ITER; iter++)); do
   judged_tree=$(git write-tree)
   if protected_in_tree "$judged_tree"; then ok=0; fi
   if [ "$ok" = 1 ]; then judge "$idx" || ok=0; fi
+  # The formatter and judge commands can set index flags, which hide their edits from
+  # the snapshot below. Any flag set since the coder fails the attempt; then clear them.
+  refresh_index_flags || die "could not read the git index"
+  if [ -n "$(index_flag_paths)" ]; then log "index flags set during the attempt; attempt fails"; ok=0; fi
+  clear_index_flags || die "could not clear index flags"
   git add -A
   if [ "$(git write-tree)" != "$judged_tree" ]; then
     log "judge commands modified the tree"
@@ -378,13 +423,14 @@ for ((iter = 1; iter <= MAX_ITER; iter++)); do
     # judging. Logged so the gap is visible; the policy for them is an open decision.
     ignored_since_attempt || die "could not list ignored files"
     if [ -s "$state/ignored.new" ]; then
-      log "warning: $(wc -l < "$state/ignored.new" | tr -d ' ') ignored file(s) created by this attempt are not committed: $(head -n 5 "$state/ignored.new" | tr '\n' ' ')"
+      log "warning: $(zero_count "$state/ignored.new") ignored file(s) created by this attempt are not committed: $(zero_names "$state/ignored.new")"
     fi
   else
     { git diff HEAD; git ls-files --others --exclude-standard | sed 's/^/new file: /'; } > "$state/last.$id.diff" || true
-    # Keep only added note lines outside the committed tree before discarding.
+    # Keep only added note lines outside the committed tree before discarding. Only
+    # hunk bodies count: file headers (such as +++) are skipped, but a note that begins with ++ is kept.
     git diff --no-ext-diff --unified=0 HEAD -- PROGRESS.md |
-      awk '/^\+\+\+/ {next} /^\+/ {print substr($0, 2)}' >> "$state/notes.$id"
+      awk '/^@@/ {hunk = 1; next} hunk && /^\+/ {print substr($0, 2)}' >> "$state/notes.$id"
     # The clean-start gate establishes that these are attempt-owned changes.
     # Discard the tree changes; saved notes and coder output remain in .loop/.
     git reset -q --hard HEAD
@@ -393,8 +439,8 @@ for ((iter = 1; iter <= MAX_ITER; iter++)); do
     # pre-existing caches, never .loop/), so a discarded artifact cannot satisfy a later judge.
     ignored_since_attempt || die "could not list ignored files"
     if [ -s "$state/ignored.new" ]; then
-      log "removing $(wc -l < "$state/ignored.new" | tr -d ' ') ignored file(s) created by failed attempt $n: $(head -n 5 "$state/ignored.new" | tr '\n' ' ')"
-      while IFS= read -r f; do rm -f -- "$f"; done < "$state/ignored.new"
+      log "removing $(zero_count "$state/ignored.new") ignored file(s) created by failed attempt $n: $(zero_names "$state/ignored.new")"
+      while IFS= read -r -d '' f; do rm -f -- "$f"; done < "$state/ignored.new"
     fi
     log "$id failed attempt $n"
     if [ "$n" -ge "$MAX_ATTEMPTS" ]; then

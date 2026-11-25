@@ -378,19 +378,25 @@ the kit's language/check tools. Do not install prerequisites without permission.
   Each task requires exit 0 and every `expect` matching a complete stdout line;
   stderr cannot satisfy it. Empty/missing expectations are task-named kit errors,
   as is any expectation containing a newline (each must be one full-line regex).
-- An attempt that sets an index flag (`assume-unchanged` or `skip-worktree`) has
-  the flag cleared, and the file restored if protected, before any path is read.
-  Without this, git would hide the edit from restoration and from the commit.
+- An attempt that sets an index flag (`assume-unchanged`, `skip-worktree`, or
+  both together) has the flag cleared, and the file restored if protected, before
+  any path is read. Without this, git would hide the edit from restoration and
+  from the commit. A flag set by the formatter or a judge command fails the
+  attempt: the flag is cleared, and the discard restores protected files.
 - Reject judge commands that change the tree. A pass commits exactly the judged
   tree with no intervening changes or rewriting commit hooks and asserts a
   clean checkout. `git add -A` includes legitimate attempt-created new files.
-  Ignored files are not part of that tree. A pass that leaves ignored files
-  created by the attempt logs them as not committed, but keeps them. Whether
+  Ignored files are not part of that tree. Ignored files created by the attempt
+  that match a protected pattern are removed before judging. Other ignored files
+  created by the attempt are logged as not committed, but kept after a pass. Whether
   judging may depend on such files is an open owner decision (development
   review, deferred decision 14).
 - A failure saves added `PROGRESS.md` lines to `.loop/notes.<task-id>`, then
-  discards attempt-owned changes, including ignored files the attempt created.
-  Ignored files that existed before the attempt and `.loop/` are kept.
+  discards attempt-owned changes, including ignored files the attempt created,
+  whatever their names (non-ASCII names included).
+  Ignored files that existed before the attempt and `.loop/` are kept. Pre-existing
+  ignored files that the attempt modified or deleted in place are not restored
+  (development review, deferred decision 15).
   Notes from discarded attempts are included for subsequent tasks too, not
   committed; logs/diffs remain in `.loop/`.
 - `--check` runs the same judge without a coder or formatter. Check commands
@@ -494,7 +500,7 @@ Approve the next layer inline, then prepare and reverify the next kit.
 ## Local maintenance checks
 
 After inspecting the scripts, run `bash scripts/test_loop.sh` for the inherited
-fake-coder regression suite (56 cases and deliberate mutations). Optionally run
+fake-coder regression suite (63 cases and deliberate mutations). Optionally run
 `bash tests/run.sh` for the inherited Go toy kit; it also requires Go and Perl.
 Both use disposable fixture Git repositories only, never a real kit or model.
 Keep these tests and the local runner self-contained. Compare runner and format

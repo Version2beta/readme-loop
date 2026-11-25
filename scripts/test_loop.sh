@@ -471,6 +471,7 @@ SH
       equal "$(cat verify.sh)" "$(git show HEAD:verify.sh)" 'protected file restored in the worktree'
       equal "$(git ls-files -v | grep -v '^H' || true)" '' 'no index flag left set'
       contains .loop/loop.log 'clearing index flag'
+      if grep -q 'index flags set during the attempt' .loop/loop.log; then fail 'coder-set flags reached the judge'; fi
       ;;
     index-flag-startup)
       git update-index --assume-unchanged verify.sh
@@ -537,6 +538,120 @@ SH
       equal "$(git show HEAD:aXb)" legit 'unprotected file keeps its change'
       equal "$(git show 'HEAD:a*b')" base 'protected file restored'
       ;;
+    index-flags-both)
+      # Both flags together show as a lowercase s in git ls-files -v; the runner must match it too.
+      cat > fake.sh <<'SH'
+#!/usr/bin/env bash
+cat >/dev/null
+git update-index --assume-unchanged verify.sh; git update-index --skip-worktree verify.sh
+printf 'echo PASS T1\n' > verify.sh; printf 'honest\n' > feature.txt
+SH
+      git add fake.sh && git commit -qm 'coder hides verify.sh with both flags'
+      before=$(git rev-list --count HEAD)
+      run; equal "$rc" 2 'cheat through both index flags ends in STOP'
+      unchanged
+      equal "$(cat verify.sh)" "$(git show HEAD:verify.sh)" 'protected file restored with both flags set'
+      equal "$(git ls-files -v | grep -v '^H' || true)" '' 'no index flag left set'
+      contains .loop/loop.log 'clearing index flag'
+      if grep -q 'index flags set during the attempt' .loop/loop.log; then fail 'coder-set flags reached the judge'; fi
+      ;;
+    index-flag-both-startup)
+      git update-index --assume-unchanged verify.sh; git update-index --skip-worktree verify.sh
+      run; equal "$rc" 1 'startup refuses both index flags the user set'
+      contains "$work/output" 'index flags hide edits'
+      ;;
+    judge-flag)
+      # A judge command (a helper the coder wrote) sets a flag on a protected file and rewrites it.
+      # The attempt must fail, and the discard must restore the file and clear the flag.
+      printf '%s\n' 'bash hook.sh 2>/dev/null; exit 0' > verify.sh
+      git add -A && git commit -qm 'verify runs a coder helper'
+      cat > fake.sh <<'SH'
+#!/usr/bin/env bash
+cat >/dev/null
+cat > hook.sh <<'HOOK'
+git update-index --skip-worktree verify.sh
+printf 'echo PASS T1\n' > verify.sh
+echo PASS T1
+HOOK
+printf 'honest\n' > feature.txt
+SH
+      git add fake.sh && git commit -qm 'coder helper rewrites verify.sh from the judge'
+      before=$(git rev-list --count HEAD)
+      run; equal "$rc" 2 'judge-time index flag attempt is refused until STOP'
+      unchanged
+      equal "$(cat verify.sh)" "$(git show HEAD:verify.sh)" 'protected file restored after the judge rewrote it'
+      equal "$(git ls-files -v | grep -v '^H' || true)" '' 'no index flag left set by the judge'
+      contains .loop/loop.log 'index flags set during the attempt'
+      if grep -q 'every task passes' "$work/output"; then fail 'loop passed on a file rewritten by the judge'; fi
+      ;;
+    ignored-protected)
+      # A protected path created as an ignored file is removed before judging, so it cannot satisfy the judge.
+      config '.protected += ["^testdata/"]'
+      printf 'test -f testdata/x && echo PASS T1 || echo FAIL T1\n' > verify.sh
+      git add -A && git commit -qm 'verify needs a protected ignored file'
+      cat > fake.sh <<'SH'
+#!/usr/bin/env bash
+cat >/dev/null
+printf 'testdata/\n' >> .gitignore; mkdir -p testdata; printf 'x\n' > testdata/x; printf 'good\n' > code
+SH
+      git add fake.sh && git commit -qm 'coder adds an ignore rule and a protected ignored file'
+      before=$(git rev-list --count HEAD)
+      run; equal "$rc" 2 'protected ignored file does not satisfy the judge'
+      unchanged
+      [ ! -e testdata/x ] || fail 'protected ignored file survived the attempt'
+      contains .loop/loop.log 'removing protected ignored file created by the attempt: testdata/x'
+      ;;
+    quoted-discard)
+      # git quotes this non-ASCII name in line output; the discarded artifact must still be removed.
+      cat > verify.sh <<'SH'
+#!/usr/bin/env bash
+test -f "ignored/dé/artifact" && grep -qx good code && echo PASS T1 || echo FAIL T1
+SH
+      git add -A && git commit -qm 'verify needs a non-ASCII artifact'
+      cat > fake.sh <<'SH'
+#!/usr/bin/env bash
+cat >/dev/null
+if [ "$ATTEMPT" = 1 ]; then mkdir -p "ignored/dé"; printf 'artifact\n' > "ignored/dé/artifact"
+else printf 'good\n' > code; fi
+SH
+      git add fake.sh && git commit -qm 'coder leaves a non-ASCII artifact on attempt 1'
+      before=$(git rev-list --count HEAD)
+      run; equal "$rc" 2 'artifact from a discarded attempt does not satisfy later attempts'
+      unchanged
+      [ ! -e "ignored/dé/artifact" ] || fail 'discarded non-ASCII ignored artifact survived'
+      contains .loop/loop.log 'removing 1 ignored file(s) created by failed attempt 1'
+      ;;
+    newline-discard)
+      # A discarded attempt's ignored artifact whose name contains a newline is removed whole.
+      cat > verify.sh <<'SH'
+#!/usr/bin/env bash
+test -f "$(printf 'ignored/a\nb')" && grep -qx good code && echo PASS T1 || echo FAIL T1
+SH
+      git add -A && git commit -qm 'verify needs a newline-named artifact'
+      cat > fake.sh <<'SH'
+#!/usr/bin/env bash
+cat >/dev/null
+if [ "$ATTEMPT" = 1 ]; then mkdir -p ignored; printf 'artifact\n' > "$(printf 'ignored/a\nb')"
+else printf 'good\n' > code; fi
+SH
+      git add fake.sh && git commit -qm 'coder leaves a newline-named artifact on attempt 1'
+      before=$(git rev-list --count HEAD)
+      run; equal "$rc" 2 'newline-named artifact of a discarded attempt does not satisfy later attempts'
+      unchanged
+      [ ! -e "$(printf 'ignored/a\nb')" ] || fail 'discarded newline-named ignored artifact survived'
+      ;;
+    plusplus-note)
+      # A note line beginning with ++ is a real note, not a diff header, and must reach the next prompt.
+      cat > fake.sh <<'SH'
+#!/usr/bin/env bash
+cat >/dev/null
+printf '++ note about the output\n' >> PROGRESS.md
+SH
+      git add fake.sh && git commit -qm 'coder writes a ++ note'
+      MAX_ITER=1 run; equal "$rc" 3 'one iteration stops at the cap'
+      contains .loop/notes.T1 '++ note about the output'
+      if grep -q 'PROGRESS.md' .loop/notes.T1; then fail 'diff header leaked into the notes'; fi
+      ;;
     *) fail "unknown case $1";;
   esac
 }
@@ -579,7 +694,7 @@ mutate() {
   [[ $source == *"$old"* ]] || fail "mutation anchor absent: $old"
   source=${source/"$old"/"$new"}
 }
-cases=(search-count notes notes-cross-task judge-writes formatter-protected good formatted protected substring stderr nonzero hang empty-command empty-expect missing-expect legacy untracked defaults hard escalation check-format check-command earlier timeout-format timeout-format-check timeout-check check-once check-once-metadata check-once-select check-once-gates custom-tasks-plus custom-tasks-dot custom-tasks-absolute check-mutation check-once-mutation timeout-ignores-term coder-ignores-term task-nul empty-override blank-command newline-expect rename-protected quoted-protected gitignore-edit coder-timeout protected-window check-untracked unreadable-snapshot index-flags index-flags-skip index-flag-startup ignored-discard ignored-pass-warning attempts-corrupt blank-kit-command glob-pathspec)
+cases=(search-count notes notes-cross-task judge-writes formatter-protected good formatted protected substring stderr nonzero hang empty-command empty-expect missing-expect legacy untracked defaults hard escalation check-format check-command earlier timeout-format timeout-format-check timeout-check check-once check-once-metadata check-once-select check-once-gates custom-tasks-plus custom-tasks-dot custom-tasks-absolute check-mutation check-once-mutation timeout-ignores-term coder-ignores-term task-nul empty-override blank-command newline-expect rename-protected quoted-protected gitignore-edit coder-timeout protected-window check-untracked unreadable-snapshot index-flags index-flags-skip index-flag-startup index-flags-both index-flag-both-startup judge-flag ignored-discard ignored-pass-warning ignored-protected quoted-discard newline-discard plusplus-note attempts-corrupt blank-kit-command glob-pathspec)
 fails=0
 for name in "${cases[@]}"; do
   if bash "$0" --case "$name" "$loop" > "$work/case.log" 2>&1; then
@@ -630,9 +745,12 @@ for name in "${cases[@]}"; do
     coder-timeout) mutate 'if [ "$rc" = 124 ] || [ "$rc" = 137 ]; then ok=0; fi' ':';;
     check-untracked) mutate 'GIT_INDEX_FILE="$state/check.index" git add -A || return 1' 'GIT_INDEX_FILE="$state/check.index" git add -u || return 1';;
     unreadable-snapshot) mutate 'GIT_INDEX_FILE="$state/check.index" git add -A || return 1' 'GIT_INDEX_FILE="$state/check.index" git add -A';;
-    index-flags|index-flags-skip) mutate 'clear_index_flags || die "could not clear index flags"' ':';;
+    index-flags|index-flags-skip)
+      mutate '[ "$rc" = 137 ] && log "coder killed (exit 137; timeout ignored SIGTERM or SIGKILL) after ${ITER_SECONDS}s limit"
+  clear_index_flags || die "could not clear index flags"' '[ "$rc" = 137 ] && log "coder killed (exit 137; timeout ignored SIGTERM or SIGKILL) after ${ITER_SECONDS}s limit"
+  :';;
     index-flag-startup) mutate '[ -z "$(index_flag_paths)" ] || die' 'true || die';;
-    ignored-discard) mutate 'while IFS= read -r f; do rm -f -- "$f"; done < "$state/ignored.new"' ':';;
+    ignored-discard) mutate 'while IFS= read -r -d '"''"' f; do rm -f -- "$f"; done < "$state/ignored.new"' ':';;
     ignored-pass-warning) mutate 'if [ -s "$state/ignored.new" ]; then
       log "warning:' 'if false; then
       log "warning:';;
@@ -642,6 +760,11 @@ for name in "${cases[@]}"; do
       ;;
     blank-kit-command) mutate '(type == "string" and test("\\S"))' '(type == "string")';;
     glob-pathspec) mutate 'git checkout -q HEAD -- ":(literal)$f"' 'git checkout -q HEAD -- "$f"';;
+    index-flags-both|index-flag-both-startup) mutate 's/^[hsS] //p' 's/^[hS] //p';;
+    judge-flag) mutate 'if [ -n "$(index_flag_paths)" ]; then log "index flags set during the attempt; attempt fails"; ok=0; fi' ':';;
+    ignored-protected) mutate 'log "removing protected ignored file created by the attempt: $f"; rm -f -- "$f"' ':';;
+    quoted-discard|newline-discard) mutate "git ls-files -z -o -i --exclude-standard -- ':(exclude).loop' | LC_ALL=C sort -z" "git ls-files -o -i --exclude-standard -- ':(exclude).loop' | tr '\n' '\0' | LC_ALL=C sort -z";;
+    plusplus-note) mutate 'hunk && /^\+/' '/^\+\+\+/ {next} /^\+/';;
     empty-expect|missing-expect)
       mutate 'if [ -n "$bad_expect" ]; then' 'if false; then'
       ;;

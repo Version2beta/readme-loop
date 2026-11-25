@@ -3,19 +3,20 @@
 ## Authority, scope and independent review
 
 Branch `overnight-reliability-performance`. The first two rounds below used base
-`a1f9daa`. The continuation section starts from `816f36f`, the base of the final
-review. Local edits, tests and commits only: no push, release, dependency install,
+`a1f9daa`. The first continuation starts from `816f36f`, the base of the final
+review. The second continuation starts from `7496c6f` (the first continuation's commit). Local edits, tests and commits only: no push, release, dependency install,
 installed-skill change, production or SIE access, agent, model/API or CLI model
 call, and no nested job. This session may not start model calls, so all paid work
 must go through the owner's controller. `ARTICLE-DRAFT.md` is untracked, was not
 read for this work and is not added.
 
-**Independent review of this change: not performed.** No reviewer agent was run.
-A reviewer is a model call, which this session may not start, so the reviewer
-authorization in the continuation brief cannot be used here. Everything in this
-report from the rounds of work is self-review and not evidence of independent
-verification. A fresh reviewer would also be of the same model family as the
-writer, which limits its independence.
+**Independent review of the second continuation: not performed.** No reviewer agent
+was run, and this session may not start one: a reviewer is a model call. The
+changes in the second continuation (below) have had only self-review and local
+tests. The findings they answer came from a read-only review of `7496c6f` by a
+reviewer of the same model family as the writer. That review is an input to this
+work, not a review of these changes. Everything else in the rounds of work is
+self-review and is not evidence of independent verification.
 
 An earlier read-only review of commit `ed40ea0` was made by a separate reviewer
 session (its result is in the private overnight artifacts). It made no changes and
@@ -128,8 +129,98 @@ suite (a mutant of the fixed line). Each mutant is caught.
   modified in place (decision 15). Only files it created are removed.
 - The ignored-file listing runs twice per attempt. Its cost grows with the number of
   ignored files; see Performance.
-- Ignored file names containing a newline are not handled. The startup check for
-  untracked files has the same limit.
+- Ignored file names containing a newline: resolved in the second continuation (below).
+  The startup check for untracked files still lists names by line; a newline there
+  makes the name appear differently, and the check refuses, so it is not a bypass.
+
+## Second continuation from `7496c6f`: review findings
+
+Source: a read-only review of `7496c6f` (from the private overnight result
+`continuation/runner-review-3.json`; its verdict and finding text were read, and no
+other result fields). The reviewer ran no commands and made no edits, and it is of
+the same model family as the writer. Its findings were treated as hypotheses. Each
+was reproduced first on the HEAD runner (`7496c6f` `scripts/loop.sh`, SHA-256
+`faefa253…`) in disposable fixtures under `/tmp/rl-exp3`, with a scripted fake coder
+and no model. Each regression case added here was also run on the HEAD runner, and
+fails there for the stated reason.
+
+| # | Finding | Reproduced on `7496c6f` | Disposition |
+| --- | --- | --- | --- |
+| 1 (high) | Both index flags set. `ls-files -v` prints a lowercase `s`, which `^[hS] ` did not match, so startup and the clearing step both missed it. | **Yes.** Attempt: rc 0 and `every task passes`, while HEAD's `verify.sh` still fails. Startup with both flags: rc 0, where refusal was expected. | **Fixed:** pattern `^[hsS] `. Cases `index-flags-both`, `index-flag-both-startup`. |
+| 2 (high if reproduced) | A formatter or judge command sets an index flag, so the `git add -A` after the judge skips its edit. | **Yes.** rc 0 and `every task passes`, while HEAD fails. The flag stayed set on `verify.sh` after the run. The discard did not restore the flagged file, so the next iteration's test passed on the edit. | **Fixed:** a flag set after the coder fails the attempt. Flags are cleared before the snapshot, and the discard restores the file. Case `judge-flag`. Check-only modes are not affected: their temporary index ignores the real index flags. `--check` and `--check-once` both reported `judge commands modified the tree` (rc 1) on a judge that set a flag and edited the file. Those modes still leave the flag set (report-only, deferred decision 3). |
+| 3 (medium) | An ignored file matching a protected pattern is judged, but it is not in the commit. | **Yes.** rc 0. `testdata/x` was absent from HEAD, and the warning was logged. | **Fixed:** ignored files the attempt created that match a protected pattern are removed before judging. Pre-existing ignored files are not touched. Case `ignored-protected`. |
+| 4 (medium) | Git quotes non-ASCII and special ignored names, so the discard cannot remove them by the quoted text. | **Yes.** `"ignored/d\303\251/artifact"` was logged as removed but survived, and attempt 2 passed (rc 0). A name containing a newline also survived (rc 0). | **Fixed:** the listing is NUL-delimited and the set difference is NUL-safe. Cases `quoted-discard`, `newline-discard`. Newline names are now handled, so that limit in the first continuation no longer holds. |
+| 5 (low) | A note line that begins with `++` is dropped. | **Yes.** `.loop/notes.T1` was empty. | **Fixed:** notes come from hunk bodies only. Case `plusplus-note`. |
+| 6 (low) | A snapshot failure in attempt mode (`git add` on an unreadable file) exits with the attempt's changes left in the worktree. | **Yes, observed.** rc 128, with `M code` and `?? unreadable` left in the worktree and HEAD unchanged. The next clean-start gate refuses the dirty tree. | **Not changed. Deferred decision 16.** No commit is made and the run fails loudly. Discarding on a git failure would change the attempt-discard policy (decision 6). |
+
+Documentation from the same review: the index-flag rules in `SKILL.md` now match
+the runner for both flags and for judge-time flags; the stale "SHA-256 after
+changes" line in "Source state" repeated the base hashes and is removed; decision 15
+now covers deletions as well as modifications.
+
+### Performance (second continuation)
+
+Fake coder, one passing attempt (`MAX_ITER=1`), disposable repositories under
+`/tmp/rl-exp3`, three runs each, one machine (its load was not controlled). The
+harness is `/tmp/rl-exp3/perf.sh`, not committed. Check mode runs the judge only,
+with no coder, so its test fails and it measures the judge path.
+
+| Mode | Ignored files | `7496c6f` (s) | Working tree (s) |
+| --- | ---: | --- | --- |
+| attempt | 0 | 0.318, 0.310, 0.300 | 0.349, 0.349, 0.353 |
+| attempt | 20,000 | 0.378, 0.340, 0.337 | 0.484, 0.502, 0.538 |
+| check | 0 | 0.136, 0.119, 0.119 | 0.118, 0.122, 0.121 |
+| check | 20,000 | 0.125, 0.138, 0.125 | 0.119, 0.123, 0.126 |
+
+A passing no-op attempt costs about 0.03 s more with no ignored files, and about
+0.15 s more with 20,000 ignored files. The added work is a few extra
+`git ls-files` listings of ignored files per attempt, and one index-flag listing
+after the judge. Check modes are unchanged within this run's spread. A first
+version compared the ignored listings entry by entry in bash. It cost about 2.3 s
+per attempt at 20,000 ignored files, so the `comm` fast path replaced it. The bash
+merge is kept only for names that contain a newline, where `comm` is not exact.
+Not measured: coder and application test time, ignored trees larger than 20,000
+files, and Linux.
+
+### Validation (second continuation, observed in this session)
+
+- Baseline before any edit: `bash scripts/test_loop.sh` at `7496c6f`: **56/56 cases,
+  56/56 regressions, exit 0**.
+- Final: `bash scripts/test_loop.sh` on the final files: **63/63 cases, 63/63
+  regressions, exit 0**. The seven added cases are `index-flags-both`,
+  `index-flag-both-startup`, `judge-flag`, `ignored-protected`, `quoted-discard`,
+  `newline-discard`, `plusplus-note`.
+- The seven added cases fail on the HEAD runner for their stated reasons (see the
+  table). The `index-flags` and `index-flags-skip` cases now also assert that coder-set
+  flags never reach the judge; their mutants (removing the post-coder clear) are
+  caught on that assertion.
+- The ignored-file merge was checked with a property test outside the repository:
+  200 random trials in each of four environments (ambient `en_US.UTF-8`, `LC_ALL=C`,
+  `LC_ALL=en_US.UTF-8`, `LANG=en_US.UTF-8`), half of them with names that contain a
+  newline, against a naive reference. **0 mismatches** in every environment.
+- `tests/run.sh` (Go toy kit, `GOPROXY=off`, `GOTOOLCHAIN=local`, temporary `GOCACHE` and
+  `GOMODCACHE`): 13 `ok`, exit 0.
+- `python3 -I tests/test_install.py`, `tests/test_kit_format.py`,
+  `tests/test_runner_config.py`: exit 0 each.
+- `bash -n` and `/bin/bash -n` on `scripts/loop.sh`, `scripts/test_loop.sh`,
+  `scripts/install.sh`, `tests/run.sh`, `tests/fakecoder.sh`: passed. `git diff --check`: clean.
+
+Environment limits: Bash 3.2.57 on arm64 macOS only; GNU `timeout`, Linux and CI were
+not run; not run as root; no live coder and no model call. The fixtures were in
+`/tmp`, and the property test and performance harness are not committed.
+
+### Second continuation: open items
+
+- **Deferred decision 16 (new).** On an attempt-mode git failure, the run stops
+  with the attempt's changes left in the worktree (observed, finding 6). The clean-start
+  gate then refuses the next run, so the failure is loud and nothing is committed. A
+  change would discard attempt-owned work after a failed git command, which is the
+  attempt-discard policy (decision 6). Owner choice.
+- **Decision 14 and decision 15** are unchanged in substance. Decision 15 now also covers
+  pre-existing ignored files the attempt deleted.
+- **Clean-start gate and `ARTICLE-DRAFT.md`.** The untracked `ARTICLE-DRAFT.md` makes
+  the clean-start gate refuse any real run in this checkout. It was not added, ignored
+  or moved. Whether to ignore or move it is an owner decision.
 
 ## Runner investigation (round one, unchanged)
 
@@ -348,6 +439,14 @@ case is valid for this user); no live coder, no live kit, no model calls. The
 - Try a judge that ignores SIGTERM, one that spawns a same-group grandchild, and one that uses `setsid` or `set -m`.
 - Run the suite under a newer Bash and, if possible, GNU `timeout` (check the exit status for a timeout that needed KILL).
 
+- Second continuation: set both flags, then have a judge command set one and edit the file;
+  a formatter that sets a flag. Confirm the attempt fails and the file is restored.
+- A failed attempt that creates an ignored file with a non-ASCII name, a quote, a backslash
+  and a newline in its name. Confirm each is removed, and that a file that existed before
+  the attempt is kept.
+- A `.gitignore` edit that hides a protected pattern. Confirm the new file is removed before the judge.
+- A note line that begins with `++`. Confirm it reaches `.loop/notes.<id>`.
+
 ## Deferred decisions and limitations
 
 1. Should an interrupted attempt count toward `MAX_ATTEMPTS`? Current: yes.
@@ -364,7 +463,9 @@ case is valid for this user); no live coder, no live kit, no model calls. The
 12. **New.** GNU `timeout` exit status for a command that needed KILL is unverified. The test accepts either label.
 13. **New.** Snapshot cost on a large repository is unmeasured; the per-attempt checks are not in the benchmark. (Measured in the continuation; see Performance.)
 14. **New (M2a, open policy).** May a passing attempt be judged on ignored files that its commit does not contain? Current: yes, with a warning in `.loop/loop.log`. The options are: (a) refuse a pass that creates ignored files, which would block coders whose own test runs create caches such as `__pycache__`; (b) allow a list of cache paths named by the owner and refuse other ignored files; (c) judge in a clean export of the committed tree, which changes what the judge sees and costs time. Related: decision 9 (`.gitignore` is not protected by default).
-15. **New.** A discarded attempt removes ignored files it created, but does not restore pre-existing ignored files it modified in place. Options: keep a content copy of ignored files (cost grows with their size) or accept the gap.
+15. **New.** A discarded attempt removes ignored files it created, but does not restore pre-existing ignored files it modified or deleted in place. Options: keep a content copy of ignored files (cost grows with their size) or accept the gap.
+16. **New (second continuation).** An attempt-mode git failure while snapshotting (finding 6) stops the run with the attempt's changes left in the worktree. Discarding them automatically is the alternative; it changes the attempt-discard policy (decision 6). Owner choice.
+
 ## Source state
 
 - Continuation base: `816f36f`. Branch: `overnight-reliability-performance`. The continuation commit is recorded in `git log`; `main` was not touched.
@@ -372,7 +473,11 @@ case is valid for this user); no live coder, no live kit, no model calls. The
 - Changed files in the continuation: `scripts/loop.sh`, `scripts/test_loop.sh`, `SKILL.md`, `README.md`, `references/development-review.md`.
 - Continuation SHA-256 (working tree at the time of the final suite run): `scripts/loop.sh` `faefa253dff9fe6e728075f01a0f8a6a50a147066f9da3db7af85b72a9f582dd`; `scripts/test_loop.sh` `0a4aaf2300c92586d8cab20a1c12bf52b526316ddec0ea785a6915b61b54603c`.
 - Earlier-round hashes: `scripts/loop.sh` at `816f36f` `a24c5348…`, at `a1f9daa` `232a5c0a…`; `scripts/test_loop.sh` at `816f36f` `bbe9e3df…`. All verified against blobs in git history.
-- SHA-256 after changes: `scripts/loop.sh` `a24c5348bd21f317f007fc2a3a91a09811b9f78345223aa9151af9c3f010d2ee`; `scripts/test_loop.sh` `bbe9e3df0c8abd0cf6157344160e731ee1f3a7ad4ee4c95d3775d2db15e2117b`.
+- Second continuation (base `7496c6f`, final files, after the last suite run):
+  `scripts/loop.sh` `9b4d60534e01287ba4f80508c1068287081397a196fbb82a074de19ec6260baf`;
+  `scripts/test_loop.sh` `a013e22a3a2405da7c95795414afda414e20e8a6152720a22497a30a4abd9706`;
+  `SKILL.md` `052009200d3fdeb55518d983c6283562ad470a5dcbc3c9eda49143f441ec504b`;
+  `README.md` `f6dfd0774e309c08302c81828c75404b442a3bc2fce575e00967bebfc9622e6a`.
 - Baseline `scripts/loop.sh` SHA-256 at `a1f9daa`: `232a5c0a35496f10e791ab164f0a12b9760e9260025017252d53f9bb6f7097a1`.
 - Untracked `ARTICLE-DRAFT.md` left untouched and not committed.
 - Not merged to `main`; pending independent review. No remote operation.
