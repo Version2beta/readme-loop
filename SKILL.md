@@ -371,8 +371,12 @@ the kit's language/check tools. Do not install prerequisites without permission.
 - Restore protected paths including new files, run `format`, restore protected
   paths again, record the tree, then judge `format_check`, this task, earlier
   tasks and `check`. Optional top-level commands are skipped only if absent.
+  Protected matching uses NUL-delimited Git paths with rename detection off, so
+  quoted (non-ASCII) or renamed names cannot escape restoration. If a coder breaks
+  the `.loop/` ignore rule, `.gitignore` is restored from HEAD before snapshots.
   Each task requires exit 0 and every `expect` matching a complete stdout line;
-  stderr cannot satisfy it. Empty/missing expectations are task-named kit errors.
+  stderr cannot satisfy it. Empty/missing expectations are task-named kit errors,
+  as is any expectation containing a newline (each must be one full-line regex).
 - Reject judge commands that change the tree. A pass commits exactly the judged
   tree with no intervening changes or rewriting commit hooks and asserts a
   clean checkout. `git add -A` includes legitimate attempt-created new files.
@@ -384,11 +388,14 @@ the kit's language/check tools. Do not install prerequisites without permission.
   `format_check`, the selected (default all) tasks and `check` once each,
   printing `pass`/`FAIL` lines; unknown ids are an error. It never commits or
   discards and does not replace `--check` for stage acceptance. Both check-only
-  modes fail when judge commands change the working tree.
+  modes fail when judge commands change the working tree. Creating an untracked
+  file counts as a change, and a working tree that cannot be snapshotted fails.
 - Limits: `MAX_ITER=60`, `MAX_ATTEMPTS=4`, `ITER_SECONDS=1200`,
-  `JUDGE_TIMEOUT=300`. Owner environment overrides must be positive integers.
+  `JUDGE_TIMEOUT=300`. Owner environment overrides must be positive integers;
+  an empty value is refused, not defaulted, and owner commands must not be blank.
   Every formatter, format check, task test (including diagnostic probes) and
-  kit check is timed. Timeouts fail attempts and log the command; a command
+  kit check is timed. Timeouts fail attempts, including a coder timeout whatever
+  partial work it left, and log the command; a command
   that ignores SIGTERM is killed 5 seconds after its timeout. The runner
   stops at all tasks passing, a task's attempt limit (`STOP` names it), or the
   iteration cap; partial progress is not completion.
@@ -475,13 +482,14 @@ Approve the next layer inline, then prepare and reverify the next kit.
 ## Local maintenance checks
 
 After inspecting the scripts, run `bash scripts/test_loop.sh` for the inherited
-fake-coder regression suite (38 cases and deliberate mutations). Optionally run
+fake-coder regression suite (47 cases and deliberate mutations). Optionally run
 `bash tests/run.sh` for the inherited Go toy kit; it also requires Go and Perl.
 Both use disposable fixture Git repositories only, never a real kit or model.
 Keep these tests and the local runner self-contained. Compare runner and format
 bytes with the recorded source before claiming unchanged reuse; the runner now
 differs from spec-loop by `--check-once`, fixed-task metadata and expectation
-caching, check-only tree-change detection, exact task-file protection, and
-kill-after timeouts. Installation,
+caching, check-only tree-change detection, exact task-file protection,
+NUL-delimited rename-free protected matching, `.loop/` ignore-rule restoration,
+and kill-after timeouts. Installation,
 startup discovery and a live workflow trial are separate checks, not implied by
 these packaging tests.

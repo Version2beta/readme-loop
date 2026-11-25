@@ -321,7 +321,8 @@ SH
       # A regressed loop can leave a judge that survives the outer deadline.
       pkill -KILL -f 'rl-test-hang' 2>/dev/null || true
       equal "$rc" 1 'TERM-ignoring judge is killed and fails'
-      contains .loop/loop.log 'test.0 killed'
+      # Exit status for a timeout that needed KILL differs by implementation (137 or 124).
+      grep -qE 'test[.]0 (killed|timed out)' .loop/loop.log || fail 'TERM-ignoring judge not logged as killed or timed out'
       ;;
     coder-ignores-term)
       cat > fake.sh <<'SH'
@@ -344,6 +345,111 @@ SH
       run --check-once; equal "$rc" 1 'NUL bytes in task text refused'
       contains "$work/output" 'may not contain NUL bytes'
       [ ! -d .loop ] || fail 'state created for NUL-bearing kit'
+      ;;
+    empty-override)
+      printf 'good\n' > code
+      rc=0; env MAX_ITER= bash scripts/loop.sh --check-once > "$work/output" 2>&1 || rc=$?
+      equal "$rc" 1 'empty MAX_ITER is refused rather than defaulted'
+      contains "$work/output" 'MAX_ITER must be a positive integer'
+      ;;
+    blank-command)
+      printf 'good\n' > code
+      rc=0; env CHEAP_CMD='  ' bash scripts/loop.sh --check-once > "$work/output" 2>&1 || rc=$?
+      equal "$rc" 1 'blank CHEAP_CMD is refused'
+      contains "$work/output" 'CHEAP_CMD is empty or blank'
+      ;;
+    newline-expect)
+      config '.tasks[0].test = "echo FAIL T1" | .tasks[0].expect = ["PASS T1\nFAIL T1"]'
+      run --check-once; equal "$rc" 1 'multi-line expectation refused'
+      contains "$work/output" 'single-line regular expression'
+      [ ! -d .loop ] || fail 'state created for invalid expectation'
+      ;;
+    rename-protected)
+      cat > fake.sh <<'SH'
+#!/usr/bin/env bash
+cat >/dev/null
+printf 'good\n' > code
+git mv PROMPT.md PROMPT.v2.md
+SH
+      git add fake.sh && git commit -qm 'coder renames a protected file'
+      run; equal "$rc" 0 'honest code passes after a protected rename'
+      equal "$(git show HEAD:PROMPT.md)" 'fixture prompt' 'renamed protected file restored in the commit'
+      ;;
+    quoted-protected)
+      config '.protected += ["(^|/)README\\.md$"]'
+      mkdir -p 'dé'; printf 'readme\n' > 'dé/README.md'; git add -A; git commit -qm 'non-ASCII readme'
+      cat > fake.sh <<'SH'
+#!/usr/bin/env bash
+cat >/dev/null
+printf 'good\n' > code
+printf 'cheat\n' > 'dé/README.md'
+SH
+      git add fake.sh && git commit -qm 'coder edits protected non-ASCII path'
+      run; equal "$rc" 0 'honest code passes with a protected non-ASCII path edited'
+      equal "$(git show 'HEAD:dé/README.md')" readme 'protected non-ASCII path restored'
+      ;;
+    gitignore-edit)
+      cat > fake.sh <<'SH'
+#!/usr/bin/env bash
+cat >/dev/null
+printf 'good\n' > code
+: > .gitignore
+SH
+      git add fake.sh && git commit -qm 'coder removes the ignore rule'
+      run; equal "$rc" 0 'honest code passes after the coder removes the .loop/ ignore rule'
+      equal "$(git show HEAD:.gitignore)" "$(printf '.loop/\nignored/')" 'ignore file restored in the commit'
+      [ -z "$(git ls-tree -r --name-only HEAD | grep '^\.loop/' || true)" ] || fail '.loop/ state was committed'
+      [ -f .loop/loop.log ] || fail 'loop state was deleted'
+      ;;
+    coder-timeout)
+      cat > fake.sh <<'SH'
+#!/usr/bin/env bash
+cat >/dev/null
+printf 'good\n' > code
+sleep 3
+SH
+      git add fake.sh && git commit -qm 'coder writes a passing change, then times out'
+      before=$(git rev-list --count HEAD)
+      MAX_ITER=1 ITER_SECONDS=1 run; equal "$rc" 3 'run stops at the iteration cap'
+      contains .loop/loop.log 'coder timed out'
+      unchanged
+      ;;
+    protected-window)
+      # The coder changes nothing. A copy of this loop is given a protected write
+      # between restoration and the snapshot (a surviving descendant's effect). It
+      # must refuse: the write may not be judged or committed.
+      cat > fake.sh <<'SH'
+#!/usr/bin/env bash
+cat >/dev/null
+SH
+      git add fake.sh && git commit -qm 'coder makes no change'
+      src=$(<"$loop"); anchor='revert_protected # Formatting must not change protected paths either.'
+      [[ $src == *"$anchor"* ]] || fail 'window anchor absent'
+      new=$anchor$'\n'"  echo 'echo PASS T1' > verify.sh"
+      src=${src/"$anchor"/"$new"}  # no outer quotes: nested quoting here varies by bash version
+      printf '%s\n' "$src" > "$work/window.sh"
+      before=$(git rev-list --count HEAD); original=$(git show HEAD:verify.sh)
+      rc=0; MAX_ATTEMPTS=2 bash "$work/window.sh" > "$work/output" 2>&1 || rc=$?
+      equal "$rc" 2 'protected write before the snapshot stops the run'
+      contains .loop/loop.log 'protected path changed before judging: verify.sh'
+      equal "$(git show HEAD:verify.sh)" "$original" 'protected file unchanged in HEAD'
+      unchanged
+      ;;
+    check-untracked)
+      printf 'good\n' > code
+      config '.check = "printf x > new-untracked"'
+      run --check-once; equal "$rc" 1 'check-only mode rejects a judge that creates an untracked file'
+      contains .loop/loop.log 'judge commands modified the tree'
+      ;;
+    unreadable-snapshot)
+      printf 'good\n' > code
+      # The fixture's kit check runs git add -A itself, so remove it: the only
+      # failing step must be the runner's own snapshot.
+      config 'del(.check)'
+      printf 'secret\n' > unreadable; chmod 000 unreadable
+      run --check-once; chmod 600 unreadable
+      equal "$rc" 1 'check-only mode fails when the tree cannot be snapshotted'
+      contains "$work/output" 'unable to index file'
       ;;
     *) fail "unknown case $1";;
   esac
@@ -387,7 +493,7 @@ mutate() {
   [[ $source == *"$old"* ]] || fail "mutation anchor absent: $old"
   source=${source/"$old"/"$new"}
 }
-cases=(search-count notes notes-cross-task judge-writes formatter-protected good formatted protected substring stderr nonzero hang empty-command empty-expect missing-expect legacy untracked defaults hard escalation check-format check-command earlier timeout-format timeout-format-check timeout-check check-once check-once-metadata check-once-select check-once-gates custom-tasks-plus custom-tasks-dot custom-tasks-absolute check-mutation check-once-mutation timeout-ignores-term coder-ignores-term task-nul)
+cases=(search-count notes notes-cross-task judge-writes formatter-protected good formatted protected substring stderr nonzero hang empty-command empty-expect missing-expect legacy untracked defaults hard escalation check-format check-command earlier timeout-format timeout-format-check timeout-check check-once check-once-metadata check-once-select check-once-gates custom-tasks-plus custom-tasks-dot custom-tasks-absolute check-mutation check-once-mutation timeout-ignores-term coder-ignores-term task-nul empty-override blank-command newline-expect rename-protected quoted-protected gitignore-edit coder-timeout protected-window check-untracked unreadable-snapshot)
 fails=0
 for name in "${cases[@]}"; do
   if bash "$0" --case "$name" "$loop" > "$work/case.log" 2>&1; then
@@ -421,9 +527,23 @@ for name in "${cases[@]}"; do
     hang|timeout-*) mutate '"$TIMEOUT" -k "$KILL_GRACE" "$JUDGE_TIMEOUT" bash -c "$command"' 'bash -c "$command"';;
     coder-ignores-term) mutate '"$TIMEOUT" -k "$KILL_GRACE" "$ITER_SECONDS"' '"$TIMEOUT" "$ITER_SECONDS"';;
     task-nul) mutate "if jq -e 'any(.tasks[]; ([.id" "if false && jq -e 'any(.tasks[]; ([.id";;
-    custom-tasks-*) mutate 'grep -Fx -- "$tasks_rel"; }' 'true; }';;
-    check-mutation|check-once-mutation) mutate '[ "$(tree_snapshot)" != "$1" ] || return 1' 'return 1';;
-    empty-command) mutate '[ -n "${!setting}" ] || die "$setting is empty"' ':';;
+    custom-tasks-*) mutate '[ "$f" = "$tasks_rel" ]' 'false';;
+    check-mutation|check-once-mutation) mutate 'if ! now=$(tree_snapshot); then log "could not snapshot the working tree"; return 0; fi
+  [ "$now" != "$1" ] || return 1' 'return 1';;
+    empty-command) mutate '[[ ${!setting} =~ [^[:space:]] ]] || die "$setting is empty or blank"' ':';;
+    empty-override) mutate 'MAX_ITER=${MAX_ITER-60}' 'MAX_ITER=${MAX_ITER:-60}';;
+    blank-command) mutate '[[ ${!setting} =~ [^[:space:]] ]] || die "$setting is empty or blank"' '[ -n "${!setting}" ] || die "$setting is empty or blank"';;
+    newline-expect) mutate 'if jq -e '"'"'any(.tasks[].expect[]; contains("\n"))'"'"'' 'if false && jq -e '"'"'any(.tasks[].expect[]; contains("\n"))'"'"'';;
+    rename-protected) mutate 'git diff -z --no-renames --name-only HEAD' 'git diff -z --name-only HEAD';;
+    quoted-protected)
+      mutate "IFS= read -r -d '' f; do" 'IFS= read -r f; do'
+      mutate 'git diff -z --no-renames --name-only HEAD; git ls-files -z --others --exclude-standard;' 'git diff --name-only HEAD; git ls-files --others --exclude-standard;'
+      ;;
+    protected-window) mutate 'if protected_in_tree "$judged_tree"; then ok=0; fi' ':';;
+    gitignore-edit) mutate 'if ! git check-ignore -q "$state/x"; then' 'if false; then';;
+    coder-timeout) mutate 'if [ "$rc" = 124 ] || [ "$rc" = 137 ]; then ok=0; fi' ':';;
+    check-untracked) mutate 'GIT_INDEX_FILE="$state/check.index" git add -A || return 1' 'GIT_INDEX_FILE="$state/check.index" git add -u || return 1';;
+    unreadable-snapshot) mutate 'GIT_INDEX_FILE="$state/check.index" git add -A || return 1' 'GIT_INDEX_FILE="$state/check.index" git add -A';;
     empty-expect|missing-expect)
       mutate 'if [ -n "$bad_expect" ]; then' 'if false; then'
       ;;

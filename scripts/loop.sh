@@ -12,11 +12,12 @@ set -euo pipefail
 CHEAP_CMD=${CHEAP_CMD-'pi --provider anthropic --model claude-haiku-5-5 --thinking high --print --no-session'}
 STRONG_CMD=${STRONG_CMD-'pi --provider openai-codex --model gpt-6.1-sol --thinking high --print --no-session'}
 STRONGEST_CMD=${STRONGEST_CMD-'pi --provider openai-codex --model gpt-6.1-sol --thinking max --print --no-session'}
-MAX_ITER=${MAX_ITER:-60}
-MAX_ATTEMPTS=${MAX_ATTEMPTS:-4}
-ITER_SECONDS=${ITER_SECONDS:-1200}
-JUDGE_TIMEOUT=${JUDGE_TIMEOUT:-300}
-TASKS=${TASKS:-tasks.json}
+# Empty numeric overrides are errors, not defaults: '-' keeps an explicit empty value.
+MAX_ITER=${MAX_ITER-60}
+MAX_ATTEMPTS=${MAX_ATTEMPTS-4}
+ITER_SECONDS=${ITER_SECONDS-1200}
+JUDGE_TIMEOUT=${JUDGE_TIMEOUT-300}
+TASKS=${TASKS-tasks.json}
 # Fixed, not an owner setting: seconds between SIGTERM and SIGKILL when a
 # timed command ignores SIGTERM. Without it, timeout waits indefinitely.
 KILL_GRACE=5
@@ -27,7 +28,7 @@ if command -v timeout >/dev/null; then TIMEOUT=timeout
 elif command -v gtimeout >/dev/null; then TIMEOUT=gtimeout
 else die "timeout or gtimeout is required"; fi
 for setting in CHEAP_CMD STRONG_CMD STRONGEST_CMD; do
-  [ -n "${!setting}" ] || die "$setting is empty"
+  [[ ${!setting} =~ [^[:space:]] ]] || die "$setting is empty or blank"
 done
 for setting in MAX_ITER MAX_ATTEMPTS ITER_SECONDS JUDGE_TIMEOUT; do
   [[ ${!setting} =~ ^[1-9][0-9]*$ ]] || die "$setting must be a positive integer"
@@ -41,7 +42,7 @@ case "${1:-}" in
   *) die "unknown argument: $1";;
 esac
 # Reject malformed kits before creating state or executing any kit command.
-# Keep this one jq invocation: validation must not add per-judge overhead.
+# Validation uses a fixed number of jq calls at startup, never per task or judge.
 jq -e '
   type == "object" and
   (.tasks | type == "array" and length > 0 and all(.[];
@@ -92,6 +93,11 @@ if [ -n "$bad_expect" ]; then
 fi
 if jq -e 'any(.tasks[]; ([.id, (.title // ""), .test] + .expect) | any(contains("\u0000")))' "$TASKS" >/dev/null; then
   die "invalid kit: task ids, titles, commands and expectations may not contain NUL bytes"
+fi
+# An expectation is one full-line regular expression. A newline would make grep
+# treat its lines as alternatives, so "PASS\nFAIL" would accept a FAIL line.
+if jq -e 'any(.tasks[].expect[]; contains("\n"))' "$TASKS" >/dev/null; then
+  die "invalid kit: each expect must be a single-line regular expression (no newlines)"
 fi
 # Task metadata is fixed for a run. Decode once rather than spawning jq for
 # every lookup during the quadratic acceptance check. NUL separators preserve
@@ -185,13 +191,17 @@ first_failing() {
 # Check-only modes cannot restore or discard, so a judge command that changes
 # the working tree fails the run. Snapshots use a temporary index in .loop/ so
 # the user's staged state is not changed.
+# A failed add must not yield a partial tree that looks unchanged. Snapshots run
+# in command substitutions, where set -e is not inherited, so return explicitly.
 tree_snapshot() {
   rm -f "$state/check.index"
-  GIT_INDEX_FILE="$state/check.index" git add -A
-  GIT_INDEX_FILE="$state/check.index" git write-tree
+  GIT_INDEX_FILE="$state/check.index" git add -A || return 1
+  GIT_INDEX_FILE="$state/check.index" git write-tree || return 1
 }
-judge_changed_tree() { # $1 = tree snapshot taken before judging
-  [ "$(tree_snapshot)" != "$1" ] || return 1
+judge_changed_tree() { # $1 = tree snapshot taken before judging; returns 0 if changed or unknown
+  local now
+  if ! now=$(tree_snapshot); then log "could not snapshot the working tree"; return 0; fi
+  [ "$now" != "$1" ] || return 1
   log "judge commands modified the tree"
 }
 # Single pass over a fixed tree: the same commands, timeouts and full-line
@@ -237,12 +247,32 @@ if [ "$CHECK_ONLY" = 1 ]; then
 fi
 
 revert_protected() {
-  local f changed
-  changed=$({ git diff --name-only HEAD; git ls-files --others --exclude-standard; })
-  while IFS= read -r f; do
+  local f
+  # NUL-delimited, with renames disabled: git quotes unusual names in line output,
+  # and a rename hides the old path, which would then escape restoration.
+  while IFS= read -r -d '' f; do
     [ -n "$f" ] || continue
-    if git cat-file -e "HEAD:$f" 2>/dev/null; then git checkout -q HEAD -- "$f"; else rm -f -- "$f"; fi
-  done < <({ printf '%s\n' "$changed" | grep -E -- "$PROTECTED"; printf '%s\n' "$changed" | grep -Fx -- "$tasks_rel"; } || true)
+    if grep -qE -- "$PROTECTED" <<< "$f" || [ "$f" = "$tasks_rel" ]; then
+      if git cat-file -e "HEAD:$f" 2>/dev/null; then git checkout -q HEAD -- "$f"; else rm -f -- "$f"; fi
+    fi
+  done < <({ git diff -z --no-renames --name-only HEAD; git ls-files -z --others --exclude-standard; })
+  # The loop's state directory must stay ignored, or later git add/clean would
+  # stage its logs or delete them. Restore the ignore file if a coder broke it.
+  if ! git check-ignore -q "$state/x"; then
+    log "restoring .gitignore: $state/ must stay ignored"
+    if git cat-file -e "HEAD:.gitignore" 2>/dev/null; then git checkout -q HEAD -- .gitignore; else rm -f -- .gitignore; fi
+  fi
+}
+# Restoration happens before the snapshot, so a protected write that lands in
+# between (a surviving descendant) would be judged and committed. Refuse instead.
+protected_in_tree() { # $1 = tree; returns 0 if it changes a protected path relative to HEAD
+  local f
+  while IFS= read -r -d '' f; do
+    if grep -qE -- "$PROTECTED" <<< "$f" || [ "$f" = "$tasks_rel" ]; then
+      log "protected path changed before judging: $f"; return 0
+    fi
+  done < <(git diff-tree -r -z --no-renames --name-only HEAD "$1")
+  return 1
 }
 commit_attempt() {
   local message=$1 judged_tree=$2
@@ -284,10 +314,13 @@ for ((iter = 1; iter <= MAX_ITER; iter++)); do
   [ "$rc" = 137 ] && log "coder killed (exit 137; timeout ignored SIGTERM or SIGKILL) after ${ITER_SECONDS}s limit"
   revert_protected
   ok=1
+  # Timeouts fail attempts (SKILL.md): partial output from a killed coder is never judged or committed.
+  if [ "$rc" = 124 ] || [ "$rc" = 137 ]; then ok=0; fi
   if [ -n "$FORMAT_CMD" ]; then run_judge_command format "$FORMAT_CMD" || ok=0; fi
   revert_protected # Formatting must not change protected paths either.
   git add -A
   judged_tree=$(git write-tree)
+  if protected_in_tree "$judged_tree"; then ok=0; fi
   if [ "$ok" = 1 ]; then judge "$idx" || ok=0; fi
   git add -A
   if [ "$(git write-tree)" != "$judged_tree" ]; then

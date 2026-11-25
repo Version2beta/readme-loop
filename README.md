@@ -396,15 +396,16 @@ python3 tests/benchmark_loop.py
 python3 tests/benchmark_loop.py /path/to/previous/loop.sh
 ```
 
-On this development machine, three runs of 40 passing no-op tasks gave median
-`--check-once` times of 1.002s before and 0.634s after; full `--check` medians
-were 8.692s and 6.513s. These are orchestration measurements, not predictions
-for application stages dominated by actual test execution.
+Earlier timing figures that were not tied to a runner revision have been removed.
+The current benchmark numbers, the baseline runner they were compared against,
+and the validation evidence are recorded in `references/development-review.md`.
+These are orchestration measurements, not predictions for application stages
+dominated by actual test execution.
 
-Current local validation passed 30 runner cases and 30 deliberate regressions,
-including multiline metadata handling, all 13 toy-suite assertions, six installer
-tests, two kit-format tests, shell syntax checks and `git diff --check`. No live
-models or network downloads were used. Linux CI has not been run for this change.
+Current local validation (see the development report for the revision): 47 runner
+cases and 47 deliberate regressions, all 13 toy-suite assertions, the three
+Python test files, shell syntax checks and `git diff --check`. No live models or
+network downloads were used. Linux CI has not been run for this change.
 
 ### Original packaging validation and provenance
 
