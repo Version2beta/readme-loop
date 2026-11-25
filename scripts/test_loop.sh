@@ -279,6 +279,13 @@ SH
       run --check-once; equal "$rc" 1 '--check-once fails a failing task'
       contains "$work/output" 'FAIL  T1  fixture'
       ;;
+    check-once-metadata)
+      config '.tasks[0].title = "multi\nline $(touch injected)" | .tasks[0].test = "printf \"PASS T1\\n\"\nprintf \"SECOND\\n\""'
+      run --check-once; equal "$rc" 0 'multiline metadata passes'
+      equal "$(<.loop/test.0.stdout)" "$(printf 'PASS T1\nSECOND')" 'multiline command preserved'
+      contains "$work/output" 'line $(touch injected)'
+      [ ! -e injected ] || fail 'metadata was evaluated as shell code'
+      ;;
     check-once-select)
       printf 'good\n' > code
       config '.tasks = [{id:"T0", title:"broken", test:"exit 1", expect:["NEVER"], tier:"normal"}] + .tasks'
@@ -321,7 +328,7 @@ mutate() {
   [[ $source == *"$old"* ]] || fail "mutation anchor absent: $old"
   source=${source/"$old"/"$new"}
 }
-cases=(search-count notes notes-cross-task judge-writes formatter-protected good formatted protected substring stderr nonzero hang empty-command empty-expect missing-expect legacy untracked defaults hard escalation check-format check-command earlier timeout-format timeout-format-check timeout-check check-once check-once-select check-once-gates)
+cases=(search-count notes notes-cross-task judge-writes formatter-protected good formatted protected substring stderr nonzero hang empty-command empty-expect missing-expect legacy untracked defaults hard escalation check-format check-command earlier timeout-format timeout-format-check timeout-check check-once check-once-metadata check-once-select check-once-gates)
 fails=0
 for name in "${cases[@]}"; do
   if bash "$0" --case "$name" "$loop" > "$work/case.log" 2>&1; then
@@ -373,6 +380,7 @@ $untracked"' ':'
     check-once) mutate '    if task_passes "$i"; then r=pass; else r=FAIL; bad=1; fi
     printf' '    if judge "$i"; then r=pass; else r=FAIL; bad=1; fi
     printf';;
+    check-once-metadata) mutate 'task_tests+=("$value")' 'task_tests+=("exit 1")';;
     check-once-select) mutate 'if [ "$#" = 0 ]; then' 'if true; then';;
     check-once-gates)
       mutate '    if run_judge_command format_check "$FORMAT_CHECK_CMD"; then r=pass' '    if true; then r=pass'

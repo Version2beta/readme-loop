@@ -48,7 +48,25 @@ PROTECTED=$(jq -r '(.protected // []) | join("|")' "$TASKS")
 PROTECTED="${PROTECTED:+$PROTECTED|}^(${TASKS}|PROMPT\.md|SPEC\.md|scripts/loop\.sh|loop\.sh)$|^STOP$"
 ntasks=$(jq '.tasks | length' "$TASKS")
 [ "$ntasks" -gt 0 ] || die "no tasks"
-task() { jq -r ".tasks[$1].$2 // empty" "$TASKS"; }
+# Task metadata is fixed for a run. Decode once rather than spawning jq for
+# every lookup during the quadratic acceptance check. NUL separators preserve
+# multiline commands/titles without shell evaluation; indexed arrays work in
+# macOS's Bash 3.2 as well as newer Bash versions.
+task_ids=(); task_titles=(); task_tests=(); task_tiers=()
+while IFS= read -r -d '' value; do
+  task_ids+=("$value")
+  IFS= read -r -d '' value; task_titles+=("$value")
+  IFS= read -r -d '' value; task_tests+=("$value")
+  IFS= read -r -d '' value; task_tiers+=("$value")
+done < <(jq -j '.tasks[] | (.id, .title, .test, .tier) | (. // "" | tostring), "\u0000"' "$TASKS")
+task() {
+  case $2 in
+    id) printf '%s\n' "${task_ids[$1]}";;
+    title) printf '%s\n' "${task_titles[$1]}";;
+    test) printf '%s\n' "${task_tests[$1]}";;
+    tier) printf '%s\n' "${task_tiers[$1]}";;
+  esac
+}
 for ((i = 0; i < ntasks; i++)); do
   id=$(task "$i" id)
   [[ $id =~ ^[a-zA-Z0-9_-]+$ ]] || die "task $i needs a simple, nonempty id"

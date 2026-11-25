@@ -380,11 +380,36 @@ that stubs fail and the reference passes `--check-once`. The skill's
 verification procedure, review order and durable-reference rule were updated
 to match. The drift time savings are an estimate, not yet measured on a stage.
 
+### Runner metadata performance update
+
+The runner now decodes fixed task IDs, titles, commands and tiers once per
+invocation, avoiding repeated `jq` processes during judging. Check order,
+timeouts, expectations and repeated full-acceptance checks are unchanged.
+NUL-delimited decoding preserves multiline commands without shell evaluation.
+
+An optional local benchmark is available:
+
+```bash
+python3 tests/benchmark_loop.py
+# Compare another runner snapshot:
+python3 tests/benchmark_loop.py /path/to/previous/loop.sh
+```
+
+On this development machine, three runs of 40 passing no-op tasks gave median
+`--check-once` times of 1.002s before and 0.634s after; full `--check` medians
+were 8.692s and 6.513s. These are orchestration measurements, not predictions
+for application stages dominated by actual test execution.
+
+Current local validation passed 30 runner cases and 30 deliberate regressions,
+including multiline metadata handling, all 13 toy-suite assertions, six installer
+tests, two kit-format tests, shell syntax checks and `git diff --check`. No live
+models or network downloads were used. Linux CI has not been run for this change.
+
 ### Original packaging validation and provenance
 
 Copied from `/Users/rob/Development/skills/spec-loop` (the same directory linked
 at `/Users/rob/.pi/agent/skills/spec-loop`). At initial packaging, the runner,
-format, regression scripts, and toy fixtures compared byte-for-byte with that source snapshot. The runner has since added only `--check-once`;
+format, regression scripts, and toy fixtures compared byte-for-byte with that source snapshot. The runner has since added `--check-once` and fixed-metadata caching;
 the format's authoring guidance now includes the protected-surface review.
 The source's `spec-loop` names and `SPEC.md` format are deliberately retained.
 SHA-256:

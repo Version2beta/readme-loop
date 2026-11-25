@@ -24,7 +24,8 @@ Resolve bundled paths relative to this skill directory, not the tool's repo.
 Read [references/kit-format.md](references/kit-format.md) before preparing a
 kit and the header of [scripts/loop.sh](scripts/loop.sh) before running it.
 The runner is spec-loop's, unchanged in kit fields and attempt judging, plus
-one read-only addition: `--check-once` for fast kit verification. The kit
+one read-only addition: `--check-once` for fast kit verification, and cached
+fixed-task metadata to reduce process overhead. The kit
 format adapts its authoring guidance without changing runner fields.
 
 ## Roles and authority
@@ -472,11 +473,11 @@ Approve the next layer inline, then prepare and reverify the next kit.
 ## Local maintenance checks
 
 After inspecting the scripts, run `bash scripts/test_loop.sh` for the inherited
-fake-coder regression suite (29 cases and deliberate mutations). Optionally run
+fake-coder regression suite (30 cases and deliberate mutations). Optionally run
 `bash tests/run.sh` for the inherited Go toy kit; it also requires Go and Perl.
 Both use disposable fixture Git repositories only, never a real kit or model.
 Keep these tests and the local runner self-contained. Compare runner and format
 bytes with the recorded source before claiming unchanged reuse; the runner now
-differs from spec-loop only by `--check-once`. Installation,
+differs from spec-loop by `--check-once` and fixed-task metadata caching. Installation,
 startup discovery and a live workflow trial are separate checks, not implied by
 these packaging tests.
