@@ -402,8 +402,8 @@ and the validation evidence are recorded in `references/development-review.md`.
 These are orchestration measurements, not predictions for application stages
 dominated by actual test execution.
 
-Current local validation (see the development report for the revision): 47 runner
-cases and 47 deliberate regressions, all 13 toy-suite assertions, the three
+Current local validation (see the development report for the revision): 56 runner
+cases and 56 deliberate regressions, all 13 toy-suite assertions, the three
 Python test files, shell syntax checks and `git diff --check`. No live models or
 network downloads were used. Linux CI has not been run for this change.
 

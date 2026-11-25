@@ -2,14 +2,20 @@
 
 ## Authority, scope and independent review
 
-Branch `overnight-reliability-performance`, base `a1f9daa`. Local edits, tests
-and commits only: no push, release, dependency install, installed-skill change,
-production or SIE access, agent, model/API or CLI model call, and no nested job.
-`ARTICLE-DRAFT.md` is untracked, was not read for this work and is not added.
+Branch `overnight-reliability-performance`. The first two rounds below used base
+`a1f9daa`. The continuation section starts from `816f36f`, the base of the final
+review. Local edits, tests and commits only: no push, release, dependency install,
+installed-skill change, production or SIE access, agent, model/API or CLI model
+call, and no nested job. This session may not start model calls, so all paid work
+must go through the owner's controller. `ARTICLE-DRAFT.md` is untracked, was not
+read for this work and is not added.
 
-**Independent review of this change: not performed.** No reviewer agent was
-authorized for this session, so everything in this report from the second round
-of work is self-review and not evidence of independent verification.
+**Independent review of this change: not performed.** No reviewer agent was run.
+A reviewer is a model call, which this session may not start, so the reviewer
+authorization in the continuation brief cannot be used here. Everything in this
+report from the rounds of work is self-review and not evidence of independent
+verification. A fresh reviewer would also be of the same model family as the
+writer, which limits its independence.
 
 An earlier read-only review of commit `ed40ea0` was made by a separate reviewer
 session (its result is in the private overnight artifacts). It made no changes and
@@ -75,6 +81,56 @@ pattern case; interrupted-attempt accounting (deferred); `pkill -f` cleanup in t
 suite matches by global command-line pattern (`rl-test-hang`, `fake.sh cheap`),
 which is low risk but unscoped.
 
+## Continuation from `816f36f`: medium and low findings
+
+Source of the findings: the final review at `816f36f` (its result fields were
+read from the private overnight artifact). Each defect was first reproduced with
+the unchanged runner (`816f36f`) in disposable fixtures under `/tmp/rl-exp`, using
+a fake coder: no model, no network, no real repository. Each fix was then rechecked
+on the fixed runner. Each new regression case was also run against the old runner
+and fails there on the stated assertion.
+
+| Finding | Reproduced on `816f36f` | Disposition |
+| --- | --- | --- |
+| **M1** Index flags (`assume-unchanged`, `skip-worktree`) hide a protected file | **Yes.** The coder set the flag on `verify.sh`, wrote `echo PASS T1` into it and also wrote `feature.txt`. Loop exit 0, "every task passes". HEAD kept `FAIL`; the judge ran `PASS`; `git status` was clean. Without the extra file, the commit failed with exit 1 and left the cheat hidden from status. | **Fixed.** Startup refuses flags the user set. After each coder run, flags are cleared before restoration or snapshot: `git update-index` takes one mark option per call (a combined call clears only the last one; checked), so each flag is cleared in its own call. Cases `index-flags`, `index-flags-skip`, `index-flag-startup`. |
+| **M2a** An ignore rule hides a source file, so the judge sees a file the commit lacks | **Yes.** The coder added `src.txt` to `.gitignore` and wrote `src.txt`. The judge passed; HEAD lacks `src.txt`; exit 0. | **Not fixed; policy.** Judging on ignored files that the commit lacks has no safe general rule: the same mechanism covers legitimate caches and generated outputs. Pass now logs a warning that names the ignored files the attempt created. Case `ignored-pass-warning`. Open decision 14. |
+| **M2b** Discarded ignored artifacts satisfy a later judge | **Yes.** Attempt 1 wrote `ignored/artifact` and failed; `git clean -fd` left it. Attempt 2 passed. The archive of HEAD failed the same test. | **Fixed.** A discard removes ignored files the attempt created: a set difference against a listing taken before the coder. Ignored files that existed before the attempt, and `.loop/`, are kept. Case `ignored-discard`. |
+| **L1** Git failures are hidden in restoration | Not reproduced; needs a git failure in the middle of a command. | **Fixed by reading.** Listings go to a file. A failing listing stops the run in restoration, and `protected_in_tree` refuses the attempt, so the run does not pass on an unlisted change. No regression case. |
+| **L2** Restore pathspec matches globs | **Yes.** A protected `a*b` restored the unprotected `aXb` and reverted the coder's change. | **Fixed:** `:(literal)` pathspec. Case `glob-pathspec`. |
+| **L3** Coder-writable attempt count is evaluated as arithmetic | **Yes.** `state[$(touch .loop/pwned)]` in `.loop/attempts.T1` created the file on `816f36f`. | **Fixed:** the count must be digits, read with `10#`. Case `attempts-corrupt`. |
+| **L4** Late write after the index snapshot | Not reproduced. Reading: the commit contains only the judged tree, and the dirty worktree stops the run with exit 1. | **Left as is.** The run stops loudly, and the next clean-start gate refuses the dirty tree. |
+| **L5** Blank kit commands | **Yes.** `check` set to blanks passed with exit 0. | **Fixed:** a blank `format`, `format_check` or `check` is a kit error. Case `blank-kit-command`. |
+| **D1** Stale counts | Yes: README and SKILL.md said 47. | **Fixed:** 56 cases (48 plus the 8 new cases). |
+| **D2** Stage 5a time-saving statements conflict | Not checked. | **Not changed.** Owner decision 11. |
+| **D3** Hashes not verified | Verified against git blobs, not against trust. `816f36f` `scripts/loop.sh` is `a24c5348…`; `a1f9daa` is `232a5c0a…`; `816f36f` `scripts/test_loop.sh` is `bbe9e3df…`; the README packaging hash `4ed33daa…` is a blob in `scripts/loop.sh` history. | Recorded below; the README packaging hash remains labelled history. |
+
+New regression cases: `index-flags`, `index-flags-skip`, `index-flag-startup`,
+`ignored-discard`, `ignored-pass-warning`, `attempts-corrupt`,
+`blank-kit-command`, `glob-pathspec`. Each has a deliberate regression in the
+suite (a mutant of the fixed line). Each mutant is caught.
+
+### Behaviour changes a reader should know about
+
+- Startup refuses index flags set by the user (`assume-unchanged` or
+  `skip-worktree`). Previously they hid edits from the clean-start gate.
+- A discarded attempt removes the ignored files it created, including caches the
+  coder built during that attempt. The next attempt must recreate them. Caches that
+  existed before the attempt are kept.
+- A blank kit `format`, `format_check` or `check` is refused. A blank command
+  used to be skipped or to pass as a no-op.
+- A corrupt attempt counter stops the run with a message instead of being guessed.
+
+### What remains open (not fixed, stated plainly)
+
+- A passing attempt can leave ignored files that the commit does not contain.
+  They stay in the worktree and can affect later judging (M2a, decision 14).
+- A discarded attempt does not restore pre-existing ignored files that it
+  modified in place (decision 15). Only files it created are removed.
+- The ignored-file listing runs twice per attempt. Its cost grows with the number of
+  ignored files; see Performance.
+- Ignored file names containing a newline are not handled. The startup check for
+  untracked files has the same limit.
+
 ## Runner investigation (round one, unchanged)
 
 Each item was reproduced first in disposable fixtures with the unmodified runner
@@ -136,6 +192,43 @@ the attempt path, which this benchmark does not measure. Snapshot cost grows wit
 repository size and was not measured on a large repository. Application test time,
 live coding time and lifecycle cost were not measured.
 
+### Continuation measurements (attempt path and check modes)
+
+Measured with `/tmp/rl-exp/perf/measure.py` (disposable repositories under `/tmp`,
+not committed). Each attempt is one fake coder that writes `ok`, a task that passes,
+and the runner's commit. Each check is `--check` on a repository whose task passes.
+Median of three runs; a fresh copy per run; `maintenance.auto` is off in the
+templates, because a background repack in a commit moved objects during copying.
+The machine was shared with an unrelated process (load average about 3), so the
+numbers are indicative, not precise.
+
+| Tracked files | Ignored files | Mode | `816f36f` | Working tree | Difference |
+| ---: | ---: | --- | ---: | ---: | ---: |
+| 0 | 0 | attempt | 0.207 s | 0.238 s | +0.031 s |
+| 2,000 | 0 | attempt | 0.266 s | 0.311 s | +0.045 s |
+| 20,000 | 0 | attempt | 0.696 s | 0.759 s | +0.063 s |
+| 20,000 | 20,000 | attempt | 0.737 s | 0.819 s | +0.082 s |
+| 0 | 0 | check | 0.084 s | 0.084 s | 0 |
+| 2,000 | 0 | check | 0.181 s | 0.182 s | +0.001 s |
+| 20,000 | 0 | check | 1.759 s | 1.746 s | −0.013 s |
+| 20,000 | 20,000 | check | 1.795 s | 1.789 s | −0.006 s |
+
+The repository benchmark (`tests/benchmark_loop.py`, 40 no-op tasks) gave
+`--check-once` medians of 0.426 s (`816f36f`) and 0.468 s (working tree), and
+`--check` medians of 4.884 s and 4.810 s. The `--check-once` difference is within
+this machine's run-to-run spread, and check-only modes do not execute the new code.
+
+What this shows:
+
+- A no-op attempt gains about 30–80 ms. The new work is one index-flag listing,
+  two ignored-file listings and one set difference. It grows with the number of
+  tracked and ignored files; the largest measured case is 40,000 files in total.
+- Check-only modes are unchanged in these measurements.
+- Not measured: coder time, application test time, model latency, and ignored trees
+  larger than 20,000 files. Those dominate real attempts; the added cost is small
+  beside them, but that is an inference from these measurements, not a measurement
+  of a real attempt.
+
 ## Lightweight lifecycle record (existing evidence)
 
 Operator active minutes were not recorded for either run, so they are marked
@@ -148,17 +241,37 @@ unavailable, not zero. Cost is the report's stated figure.
 | Discovery, specification, judge, reference, qualification, review | — | — | unavailable | unavailable | unavailable | — | — | not recorded in the reports |
 | Operator active minutes | — | — | unavailable | unavailable | unavailable | — | — | not recorded |
 
-## Comparative pilot: prepared, not launched
+## Comparative pilot: not run, and the earlier "not authorized" claim is withdrawn
 
-No live pilot was run or authorized. This controller does not authorize nested
-paid calls, so no model or CLI command was run for the pilot. The runner changes
-above have not been exercised on a live kit; the pilot should start only after
-independent review. Blocked inputs:
+The earlier text said no live pilot was "run or authorized", and listed owner
+assignment, model commands, a total budget and commit/discard permissions as
+blocked. **That was wrong about authority.** The continuation brief authorizes:
 
-- owner-selected representative assignment, with the README and starting tree frozen;
-- withheld behavioral checks authored independently, with evaluation access separated from implementation tools;
-- pinned framework and model revisions, provider pricing, total budget and retry or stop policy;
-- owner-approved model commands and commit/discard permissions; SIE source and ownership if SIE is included.
+- choosing a small, disposable, non-destructive CLI pilot;
+- live experiments and paid work, through the controller only;
+- the models Haiku 5.5 (the controller uses exactly `claude-haiku-5-5`) and `gpt-6.1-sol`;
+- a spending limit of $8 for the controller;
+- isolated automatic commits and discards, and local Git handoffs.
+
+Authority is therefore not the blocker. What is not done, and why, is separate:
+
+- **Execution boundary, not authority.** This session may not start model calls.
+  The pilot must be run by the controller. No pilot command was run here, and no
+  pilot assignment was chosen or prepared in this session. The requested package
+  did not include the pilot.
+- **Methodological limits (these would apply even with full authority):**
+  - No behavioral checks have been written independently for a pilot assignment.
+    They must be authored apart from the implementation agent.
+  - The runner changes have not run on a live kit. The fake coder does not exercise
+    the real `pi` integration, so it cannot show how a live coder behaves.
+  - One assignment with one run per arm cannot estimate variance. Any comparison needs
+    repeated runs.
+  - The provider price of `gpt-6.1-sol` and the pilot's total cost were not verified
+    in this session.
+  - Independent review of the pilot design has not been run (see the authority
+    section). A reviewer of the same model family limits independence.
+- **Owner decisions still open** (they change the contract, not the pilot's authority):
+  decisions 8, 9, 10, 11 and 14 below.
 
 ## Validation (observed in this session)
 
@@ -190,9 +303,43 @@ Environment limits: only Bash 3.2.57 is installed (no newer Bash was checked);
 CI was not run; the installed skill was not touched. The `unreadable-snapshot`
 case needs a non-root user (root reads `chmod 000` files).
 
+## Continuation validation (observed in this session)
+
+- Baseline before any edit: `scripts/test_loop.sh` at `816f36f`, **48/48 cases and
+  48/48 regressions, exit 0**, about 8 minutes.
+- Final, on the working tree (the commit records the same files): `scripts/test_loop.sh`
+  **56/56 cases and 56/56 regressions, exit 0**. This run came after the last test edit.
+- The eight new cases fail on `816f36f` for their stated reason: `index-flags` and
+  `index-flags-skip` (the attempt is committed with rc 0 while the judge had run on the
+  cheat), `index-flag-startup`,
+  `ignored-discard`, `ignored-pass-warning`, `attempts-corrupt` (payload runs),
+  `blank-kit-command` (rc 0), `glob-pathspec` (`aXb` reverted).
+- Reproductions on `816f36f` and again on the fixed runner (disposable fixtures under
+  `/tmp/rl-exp`, fake coder): M1 assume-unchanged and skip-worktree; M2a; M2b; L2; L3;
+  L5. Results are in the continuation table.
+- `tests/run.sh` (Go toy kit) with `GOPROXY=off`, `GOTOOLCHAIN=local` and temporary
+  `GOCACHE`/`GOMODCACHE`: 13 `ok`, exit 0.
+- `python3 -I tests/test_install.py`, `tests/test_kit_format.py`,
+  `tests/test_runner_config.py`: all OK.
+- `bash -n` on `scripts/loop.sh`, `scripts/test_loop.sh`, `scripts/install.sh`,
+  `tests/run.sh`, `tests/fakecoder.sh`: passed. `git diff --check`: clean.
+- Performance: the repository benchmark and the attempt-path measurements above.
+
+Environment limits: Bash 3.2.57 (`/bin/bash`, arm64 macOS) only; `timeout` from
+macOS; no Linux; GNU `timeout` not checked; not run as root (the `unreadable-snapshot`
+case is valid for this user); no live coder, no live kit, no model calls. The
+`unreadable-snapshot` and `timeout` cases were not re-checked on another platform.
+
 ## Review requests (for an independent reviewer)
 
 - Try `TASKS` spellings: plus, `./`, absolute through a symlink, subdirectory, a name with a newline.
+- Index flags: set `assume-unchanged` or `skip-worktree` on an unprotected file and
+  edit it. The flag is cleared and the edit is committed. Confirm that is intended.
+- Ignored files: a coder that edits a pre-existing ignored file in a failed attempt.
+  Expected gap: the edit stays (decision 15). A coder that creates files in a
+  pre-existing ignored directory: only the new paths should be removed.
+- Attempt counter values such as `08` and `0009`: `10#` should read them as decimal.
+- Names with spaces or non-ASCII characters in index flags and ignored files.
 - Try protected paths with non-ASCII names, renames (`git mv`) of protected files, and a protected file deleted by the coder.
 - Try a coder that removes the `.loop/` rule, adds other ignore rules, or creates `.loop/` contents of its own.
 - Try a coder that exits after a timeout having written a passing change; confirm no commit.
@@ -215,12 +362,16 @@ case needs a non-root user (root reads `chmod 000` files).
 10. **New.** A coder timeout now fails the attempt and its partial work is discarded, as SKILL.md always said. Confirm this is the intended behaviour for long coder runs.
 11. **New.** README's approved decision row (Stage 5a judging "about 2 of roughly 3 hours") conflicts with the note that the saving is "an estimate, not yet measured on a stage". The Stage 5a source was not checked. Owner to confirm which statement stays.
 12. **New.** GNU `timeout` exit status for a command that needed KILL is unverified. The test accepts either label.
-13. **New.** Snapshot cost on a large repository is unmeasured; the per-attempt checks are not in the benchmark.
-
+13. **New.** Snapshot cost on a large repository is unmeasured; the per-attempt checks are not in the benchmark. (Measured in the continuation; see Performance.)
+14. **New (M2a, open policy).** May a passing attempt be judged on ignored files that its commit does not contain? Current: yes, with a warning in `.loop/loop.log`. The options are: (a) refuse a pass that creates ignored files, which would block coders whose own test runs create caches such as `__pycache__`; (b) allow a list of cache paths named by the owner and refuse other ignored files; (c) judge in a clean export of the committed tree, which changes what the judge sees and costs time. Related: decision 9 (`.gitignore` is not protected by default).
+15. **New.** A discarded attempt removes ignored files it created, but does not restore pre-existing ignored files it modified in place. Options: keep a content copy of ignored files (cost grows with their size) or accept the gap.
 ## Source state
 
-- Base: `a1f9daa`. Branch: `overnight-reliability-performance`. Prior commit `ed40ea0`. The commit for this round is recorded in `git log`.
-- Changed files: `scripts/loop.sh`, `scripts/test_loop.sh`, `SKILL.md`, `README.md`, `references/development-review.md`.
+- Continuation base: `816f36f`. Branch: `overnight-reliability-performance`. The continuation commit is recorded in `git log`; `main` was not touched.
+- Earlier rounds: base `a1f9daa`, prior commit `ed40ea0`.
+- Changed files in the continuation: `scripts/loop.sh`, `scripts/test_loop.sh`, `SKILL.md`, `README.md`, `references/development-review.md`.
+- Continuation SHA-256 (working tree at the time of the final suite run): `scripts/loop.sh` `faefa253dff9fe6e728075f01a0f8a6a50a147066f9da3db7af85b72a9f582dd`; `scripts/test_loop.sh` `0a4aaf2300c92586d8cab20a1c12bf52b526316ddec0ea785a6915b61b54603c`.
+- Earlier-round hashes: `scripts/loop.sh` at `816f36f` `a24c5348…`, at `a1f9daa` `232a5c0a…`; `scripts/test_loop.sh` at `816f36f` `bbe9e3df…`. All verified against blobs in git history.
 - SHA-256 after changes: `scripts/loop.sh` `a24c5348bd21f317f007fc2a3a91a09811b9f78345223aa9151af9c3f010d2ee`; `scripts/test_loop.sh` `bbe9e3df0c8abd0cf6157344160e731ee1f3a7ad4ee4c95d3775d2db15e2117b`.
 - Baseline `scripts/loop.sh` SHA-256 at `a1f9daa`: `232a5c0a35496f10e791ab164f0a12b9760e9260025017252d53f9bb6f7097a1`.
 - Untracked `ARTICLE-DRAFT.md` left untouched and not committed.

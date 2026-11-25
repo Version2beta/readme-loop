@@ -51,9 +51,9 @@ jq -e '
     (.test | type == "string" and test("\\S")) and
     ((.tier // "normal") | . == "normal" or . == "hard") and
     ((.title // "") | type == "string"))) and
-  ([.format, .format_check, .check] | all(.[]; . == null or type == "string")) and
+  ([.format, .format_check, .check] | all(.[]; . == null or (type == "string" and test("\\S")))) and
   ((.protected // []) | type == "array" and all(.[]; type == "string" and length > 0))
-' "$TASKS" >/dev/null || die "invalid kit: expected nonempty tasks with string id/test, normal/hard tier, and string commands/protection patterns"
+' "$TASKS" >/dev/null || die "invalid kit: expected nonempty tasks with string id/test, normal/hard tier, nonblank commands (or none), and string protection patterns"
 jq -e '[.tasks[].id] | length == (unique | length)' "$TASKS" >/dev/null ||
   die "duplicate task ids"
 while IFS= read -r pattern; do
@@ -150,6 +150,36 @@ state=.loop
 git check-ignore -q "$state/x" || die "add .loop/ to .gitignore"
 mkdir -p "$state"
 log() { printf 'loop: %s\n' "$*" | tee -a "$state/loop.log" >&2; }
+# Index flags make git ignore edits to a file: h = assume-unchanged, S = skip-worktree.
+# Such a file vanishes from status, add, diff and checkout. Startup refuses flags
+# the user set, because the clean-start gate could not see the tree. A coder run
+# that sets flags is cleared before anything reads the tree (clear_index_flags).
+refresh_index_flags() { git ls-files -v -z | tr '\0' '\n' > "$state/index-flags"; }
+index_flag_paths() { sed -n -e 's/^[hS] //p' "$state/index-flags"; }
+clear_index_flags() {
+  local path
+  refresh_index_flags || return 1
+  index_flag_paths > "$state/index-paths"
+  while IFS= read -r path; do
+    log "clearing index flag set during the attempt on $path"
+    # One flag per call: git applies only the last mark option given in one invocation.
+    git update-index --no-assume-unchanged -- "$path" || return 1
+    git update-index --no-skip-worktree -- "$path" || return 1
+  done < "$state/index-paths"
+}
+# Ignored files: sorted paths git ignores (excluding the loop state), and the
+# ones created since the attempt began. Removing them on discard is what keeps
+# a discarded attempt's artifacts from satisfying a later judge.
+list_ignored() { git ls-files -o -i --exclude-standard | sed -e '/^\.loop\//d' | LC_ALL=C sort > "$1"; }
+ignored_since_attempt() {
+  list_ignored "$state/ignored.after" || return 1
+  LC_ALL=C comm -13 "$state/ignored.before" "$state/ignored.after" > "$state/ignored.new"
+}
+if [ "$CHECK_ONLY" = 0 ]; then
+  refresh_index_flags || die "could not read the git index"
+  [ -z "$(index_flag_paths)" ] || die "index flags hide edits from git (assume-unchanged or skip-worktree); clear them first:
+$(index_flag_paths)"
+fi
 
 # All judge commands (including diagnostic probes) are bounded. Keep stdout
 # and stderr distinct: only stdout can satisfy an expectation.
@@ -250,12 +280,17 @@ revert_protected() {
   local f
   # NUL-delimited, with renames disabled: git quotes unusual names in line output,
   # and a rename hides the old path, which would then escape restoration.
+  # Output goes to a file so a failing git command is seen, not hidden by a
+  # process substitution. The pathspec is literal: a name such as a*b must not
+  # match and restore other files.
+  { git diff -z --no-renames --name-only HEAD && git ls-files -z --others --exclude-standard; } > "$state/paths" ||
+    die "could not list changed paths"
   while IFS= read -r -d '' f; do
     [ -n "$f" ] || continue
     if grep -qE -- "$PROTECTED" <<< "$f" || [ "$f" = "$tasks_rel" ]; then
-      if git cat-file -e "HEAD:$f" 2>/dev/null; then git checkout -q HEAD -- "$f"; else rm -f -- "$f"; fi
+      if git cat-file -e "HEAD:$f" 2>/dev/null; then git checkout -q HEAD -- ":(literal)$f"; else rm -f -- "$f"; fi
     fi
-  done < <({ git diff -z --no-renames --name-only HEAD; git ls-files -z --others --exclude-standard; })
+  done < "$state/paths"
   # The loop's state directory must stay ignored, or later git add/clean would
   # stage its logs or delete them. Restore the ignore file if a coder broke it.
   if ! git check-ignore -q "$state/x"; then
@@ -267,11 +302,14 @@ revert_protected() {
 # between (a surviving descendant) would be judged and committed. Refuse instead.
 protected_in_tree() { # $1 = tree; returns 0 if it changes a protected path relative to HEAD
   local f
+  # If git cannot list the tree, refuse: an unlisted protected change must not pass.
+  git diff-tree -r -z --no-renames --name-only HEAD "$1" > "$state/tree-paths" ||
+    { log "could not list the judged tree; refusing"; return 0; }
   while IFS= read -r -d '' f; do
     if grep -qE -- "$PROTECTED" <<< "$f" || [ "$f" = "$tasks_rel" ]; then
       log "protected path changed before judging: $f"; return 0
     fi
-  done < <(git diff-tree -r -z --no-renames --name-only HEAD "$1")
+  done < "$state/tree-paths"
   return 1
 }
 commit_attempt() {
@@ -285,7 +323,10 @@ for ((iter = 1; iter <= MAX_ITER; iter++)); do
   idx=$(first_failing)
   if [ "$idx" -lt 0 ]; then log "every task passes"; exit 0; fi
   id=$(task "$idx" id); tier=$(task "$idx" tier)
-  n=$(( $(cat "$state/attempts.$id" 2>/dev/null || echo 0) + 1 ))
+  prev=$(cat "$state/attempts.$id" 2>/dev/null || echo 0)
+  # Coder-writable state is read as a plain count only: never evaluated as arithmetic.
+  case $prev in ''|*[!0-9]*) die "$state/attempts.$id must hold a count, not: $prev";; esac
+  n=$((10#$prev + 1))
   echo "$n" > "$state/attempts.$id"
   if [ "$n" -ge "$MAX_ATTEMPTS" ]; then cmd=$STRONGEST_CMD
   elif [ "$n" -gt 1 ] || [ "$tier" = hard ]; then cmd=$STRONG_CMD
@@ -308,10 +349,12 @@ for ((iter = 1; iter <= MAX_ITER; iter++)); do
     fi
   } > "$state/prompt.md"
   log "iter $iter  task $id  attempt $n/$MAX_ATTEMPTS  Coder-Command: $cmd"
+  list_ignored "$state/ignored.before" || die "could not list ignored files"
   rc=0
   TASK_ID=$id ATTEMPT=$n "$TIMEOUT" -k "$KILL_GRACE" "$ITER_SECONDS" bash -c "$cmd" < "$state/prompt.md" > "$state/coder.$id.$n.log" 2>&1 || rc=$?
   [ "$rc" = 124 ] && log "coder timed out after ${ITER_SECONDS}s"
   [ "$rc" = 137 ] && log "coder killed (exit 137; timeout ignored SIGTERM or SIGKILL) after ${ITER_SECONDS}s limit"
+  clear_index_flags || die "could not clear index flags"
   revert_protected
   ok=1
   # Timeouts fail attempts (SKILL.md): partial output from a killed coder is never judged or committed.
@@ -331,6 +374,12 @@ for ((iter = 1; iter <= MAX_ITER; iter++)); do
     commit_attempt "loop: $id passes (attempt $n)" "$judged_tree"
     rm -f "$state/last.$id.diff"
     log "$id passed"
+    # Not committed and not removed: they stay in the worktree and can affect later
+    # judging. Logged so the gap is visible; the policy for them is an open decision.
+    ignored_since_attempt || die "could not list ignored files"
+    if [ -s "$state/ignored.new" ]; then
+      log "warning: $(wc -l < "$state/ignored.new" | tr -d ' ') ignored file(s) created by this attempt are not committed: $(head -n 5 "$state/ignored.new" | tr '\n' ' ')"
+    fi
   else
     { git diff HEAD; git ls-files --others --exclude-standard | sed 's/^/new file: /'; } > "$state/last.$id.diff" || true
     # Keep only added note lines outside the committed tree before discarding.
@@ -340,6 +389,13 @@ for ((iter = 1; iter <= MAX_ITER; iter++)); do
     # Discard the tree changes; saved notes and coder output remain in .loop/.
     git reset -q --hard HEAD
     git clean -qfd
+    # clean -fd leaves ignored files. Remove those this attempt created (never
+    # pre-existing caches, never .loop/), so a discarded artifact cannot satisfy a later judge.
+    ignored_since_attempt || die "could not list ignored files"
+    if [ -s "$state/ignored.new" ]; then
+      log "removing $(wc -l < "$state/ignored.new" | tr -d ' ') ignored file(s) created by failed attempt $n: $(head -n 5 "$state/ignored.new" | tr '\n' ' ')"
+      while IFS= read -r f; do rm -f -- "$f"; done < "$state/ignored.new"
+    fi
     log "$id failed attempt $n"
     if [ "$n" -ge "$MAX_ATTEMPTS" ]; then
       printf '%s failed %s attempts; see .loop/coder.%s.*.log\n' "$id" "$n" "$id" > STOP
