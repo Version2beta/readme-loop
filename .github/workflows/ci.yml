@@ -6,10 +6,12 @@ permissions:
   contents: read
 jobs:
   test:
+    timeout-minutes: 10
     strategy:
+      fail-fast: false
       matrix:
         include:
-          - os: ubuntu-latest
+          - os: ubuntu-24.04
             python: '3.9'
           - os: ubuntu-latest
             python: '3.x'
