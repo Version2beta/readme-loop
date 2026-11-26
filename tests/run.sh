@@ -19,7 +19,9 @@ export GIT_AUTHOR_NAME=t GIT_AUTHOR_EMAIL=t@t GIT_COMMITTER_NAME=t GIT_COMMITTER
 export CHEAP_CMD="$coder cheap" STRONG_CMD="$coder strong" STRONGEST_CMD="$coder strongest"
 
 fresh; ./scripts/loop.sh --check >/dev/null; check "stubs fail --check" $? 1
-cp -R "$here/toy-ref/." .; ./scripts/loop.sh --check >/dev/null; check "reference passes --check" $? 0
+fresh; ./scripts/loop.sh --check-once >/dev/null; check "stubs fail --check-once" $? 1
+cp -R "$here/toy-ref/." .; ./scripts/loop.sh --check-once >/dev/null; check "reference passes --check-once" $? 0
+./scripts/loop.sh --check >/dev/null; check "reference passes --check" $? 0
 git checkout -q -- . ; git clean -qfd
 
 fresh; SCHEDULE="T1:1=cheat-init T1:2=cheat-newtest T1:3=cheat-edit T2:1=wrong T4:1=cheat-testdata" ./scripts/loop.sh >/dev/null 2>&1

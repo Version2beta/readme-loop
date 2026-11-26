@@ -1,0 +1,82 @@
+# Expensive v0.1 compatibility checks stay separate from the lightweight default.
+name: Legacy runner compatibility
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - 'scripts/loop.sh'
+      - 'scripts/test_loop.sh'
+      - 'tests/run.sh'
+      - 'tests/fakecoder.sh'
+      - 'tests/test_kit_format.py'
+      - 'tests/test_runner_config.py'
+      - 'tests/literal_replace.py'
+      - 'tests/test_literal_replace.py'
+      - 'tests/toy-kit/**'
+      - 'tests/toy-ref/**'
+      - '.github/workflows/legacy.yml'
+  pull_request:
+    paths:
+      - 'scripts/loop.sh'
+      - 'scripts/test_loop.sh'
+      - 'tests/run.sh'
+      - 'tests/fakecoder.sh'
+      - 'tests/test_kit_format.py'
+      - 'tests/test_runner_config.py'
+      - 'tests/literal_replace.py'
+      - 'tests/test_literal_replace.py'
+      - 'tests/toy-kit/**'
+      - 'tests/toy-ref/**'
+      - '.github/workflows/legacy.yml'
+permissions:
+  contents: read
+concurrency:
+  group: legacy-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+jobs:
+  test:
+    timeout-minutes: 15
+    strategy:
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.x'
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.24.x'
+          cache: false
+      - name: Install legacy test prerequisites
+        run: |
+          if [ "$RUNNER_OS" = macOS ]; then
+            brew install jq coreutils
+          else
+            sudo apt-get update
+            sudo apt-get install -y jq
+          fi
+      - name: Legacy format and configuration tests
+        run: |
+          bash -n scripts/loop.sh scripts/test_loop.sh tests/run.sh tests/fakecoder.sh
+          python3 tests/test_kit_format.py
+          python3 tests/test_runner_config.py
+          python3 tests/test_literal_replace.py
+      - name: Legacy runner fixtures and deliberate regressions
+        timeout-minutes: 8
+        env:
+          GIT_CONFIG_NOSYSTEM: '1'
+          GIT_CONFIG_GLOBAL: /dev/null
+          GOPROXY: 'off'
+          GOTOOLCHAIN: local
+        run: bash scripts/test_loop.sh
+      - name: Toy Go integration
+        timeout-minutes: 5
+        env:
+          GIT_CONFIG_NOSYSTEM: '1'
+          GIT_CONFIG_GLOBAL: /dev/null
+          GOPROXY: 'off'
+          GOTOOLCHAIN: local
+        run: bash tests/run.sh

@@ -1,4 +1,7 @@
-# Protected-surface review template
+# Legacy v0.1 protected-surface review template
+
+This is retained for existing kits, not a mandatory v0.2 artifact. New milestones
+use the proportional acceptance guidance in [SKILL.md](../SKILL.md).
 
 Copy this review into a protected section of the kit's `SPEC.md`. Complete it
 before kit acceptance, handoff, or any separately authorized commit. Repeat for
@@ -61,7 +64,8 @@ architecture for contract approval rather than silently treating it as a test ne
 ## Verification and acceptance evidence
 
 - Every new implementation task fails on stubs; every task and whole-stage
-  check passes on the private reference with the unchanged runner's judge.
+  check passes on the private reference with the runner's judge
+  (`--check-once`; one full `--check` at stage acceptance).
 - Map behavioral promises (including failures and prohibited effects) to checks.
   Record plausible incorrect implementations challenged and what rejected them.
 - Record ambiguity review, residual judge weaknesses, missing integration

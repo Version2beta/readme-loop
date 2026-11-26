@@ -1,4 +1,8 @@
-# Kit format
+# Legacy v0.1 kit format
+
+Historical compatibility documentation, not the v0.2 readme-loop workflow.
+New milestones follow [the current skill](../SKILL.md); no kit is required.
+Existing kits retain their original schema and acceptance semantics below.
 
 ## Layout
 
@@ -61,8 +65,8 @@ incorrect behavior independently; never reduce coverage to simplify protection.
 | Field | Meaning |
 | --- | --- |
 | `format` | Optional formatter, run after protected paths are restored and before judging. Failure discards the attempt. |
-| `format_check` | Optional non-writing format check. Must exit 0 in the judge, including `--check`. |
-| `check` | Optional non-writing whole-kit check (vet, lint, type check). Must exit 0 in the judge, including `--check`. |
+| `format_check` | Optional non-writing format check. Must exit 0 in the judge, including `--check` and `--check-once`. |
+| `check` | Optional non-writing whole-kit check (vet, lint, type check). Must exit 0 in the judge, including `--check` and `--check-once`. |
 | `protected` | Extended regular expressions for paths the coder may not change: contracts, tests, fixtures, golden outputs, verification infrastructure, and specifically justified production exceptions recorded in the protected-surface review. A "complete; do not change" label alone does not justify production protection. The loop always adds `tasks.json`, `PROMPT.md`, `SPEC.md` and itself. |
 | `tasks[].test` | One shell command, run from the repository root. Must exit 0 and print every expected line on stdout. Stderr is logged separately and cannot satisfy expectations. |
 | `tasks[].expect` | Required, nonempty list of nonempty extended regular expressions (grep ERE). Each must match a complete stdout line (`grep -xE`), not a substring. An empty/missing list or invalid expression is a kit error naming the task. |
@@ -149,7 +153,9 @@ On failure it saves `PROGRESS.md` additions to `.loop/notes.<task-id>` before
 discarding all attempt changes. Saved notes appear in the next prompt for any
 task under "Notes from discarded attempts" and are not committed. Logs remain
 in `.loop/`. Check commands must not modify source files. `--check` uses the
-same judge but never runs the coder or formatter.
+same judge but never runs the coder or formatter. `--check-once [ID...]` runs
+`format_check`, the selected tasks (default all) and `check` once each, for
+fast verification of a fixed tree; the full `--check` remains stage acceptance.
 
 Every formatter, format check, task test (including diagnostic probes), and
 kit check has an owner-set `JUDGE_TIMEOUT` (default 300 seconds). A timeout
