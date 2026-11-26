@@ -37,5 +37,5 @@ jobs:
           python3 unpacked/tests/test_kit_format.py
       - uses: actions/upload-artifact@v4
         with:
-          name: readme-loop-${{ matrix.os }}
+          name: readme-loop-${{ matrix.os }}-python-${{ matrix.python }}
           path: readme-loop.tar.gz

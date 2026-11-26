@@ -1,5 +1,6 @@
 """Behavioral tests for the optional single-pass helper; no models or real kits."""
 import os
+import runpy
 from pathlib import Path
 import signal
 import subprocess
@@ -7,6 +8,7 @@ import sys
 import tempfile
 import time
 import unittest
+from unittest import mock
 
 ROOT = Path(__file__).resolve().parents[1]
 CHECK = ROOT / "scripts/check.py"
@@ -63,6 +65,38 @@ class CheckTests(unittest.TestCase):
         self.assertEqual(result.returncode, 124, result.stderr)
         time.sleep(0.7)
         self.assertFalse((self.cwd / "survived").exists())
+
+    def test_cleanup_verifies_zombies_and_keeps_leader_identity_until_last_signal(self):
+        module = runpy.run_path(str(CHECK))
+        process = mock.Mock(pid=12345)
+        def signal_group(pgid, signum):
+            process.wait.assert_not_called()
+            if signum == signal.SIGKILL:
+                raise PermissionError("fixture EPERM")
+        status = subprocess.CompletedProcess([], 0, "12345 Z\n")
+        with mock.patch.object(sys, "platform", "darwin"), \
+             mock.patch.object(os, "killpg", side_effect=signal_group), \
+             mock.patch.object(os, "waitid", return_value=object(), create=True), \
+             mock.patch.object(time, "sleep"), \
+             mock.patch.object(subprocess, "run", return_value=status):
+            module["stop_group"](process)
+        process.wait.assert_called_once_with()
+
+    def test_cleanup_does_not_suppress_permission_failure_for_live_or_unknown_group(self):
+        for code, output in ((0, "12345 S\n"), (0, "12345 Z\n12345 S\n"),
+                             (0, "999 Z\n"), (0, ""), (1, "")):
+            with self.subTest(code=code, output=output):
+                module = runpy.run_path(str(CHECK))
+                process = mock.Mock(pid=12345)
+                status = subprocess.CompletedProcess([], code, output)
+                with mock.patch.object(sys, "platform", "darwin"), \
+                     mock.patch.object(os, "killpg", side_effect=[None, PermissionError("fixture EPERM")]), \
+                     mock.patch.object(os, "waitid", return_value=object(), create=True), \
+                     mock.patch.object(time, "sleep"), \
+                     mock.patch.object(subprocess, "run", return_value=status):
+                    with self.assertRaises(PermissionError):
+                        module["stop_group"](process)
+                process.wait.assert_not_called()
 
     def test_timeout_kills_a_command_that_ignores_term(self):
         result = self.run_check("--timeout", "0.1", "--",

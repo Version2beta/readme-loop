@@ -25,20 +25,61 @@ def positive_seconds(value):
     return seconds
 
 
+def zombie_only_group(pgid):
+    """Confirm macOS's EPERM case without hiding permission failures on live work."""
+    try:
+        result = subprocess.run(["ps", "-o", "pgid=,stat=", "-g", str(pgid)],
+                                stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
+                                text=True, timeout=1)
+    except (OSError, subprocess.TimeoutExpired):
+        return False
+    if result.returncode != 0:
+        return False
+    states = []
+    for line in result.stdout.splitlines():
+        fields = line.split()
+        if len(fields) != 2 or fields[0] != str(pgid):
+            return False
+        states.append(fields[1])
+    return bool(states) and all(state.startswith("Z") for state in states)
+
+
+def wait_without_reaping(process):
+    """Give TERM up to a second without releasing the leader's PID identity."""
+    if not hasattr(os, "waitid") or not hasattr(os, "WNOWAIT"):
+        time.sleep(1)
+        return
+    deadline = time.monotonic() + 1
+    while time.monotonic() < deadline:
+        if os.waitid(os.P_PID, process.pid, os.WEXITED | os.WNOHANG | os.WNOWAIT) is not None:
+            return
+        time.sleep(0.01)
+
+
 def stop_group(process):
     """Do not leave same-group children running when their shell exits first."""
     try:
         os.killpg(process.pid, signal.SIGTERM)
     except ProcessLookupError:
         pass
-    try:
-        process.wait(timeout=1)
-    except subprocess.TimeoutExpired:
-        pass
+    except PermissionError:
+        if sys.platform == "darwin" and zombie_only_group(process.pid):
+            process.wait()
+            return
+        raise
+    # Keep the group leader unreaped until the final group signal. Reaping it
+    # early can release/reuse its PID while same-group children still exist.
+    # A zombie leader retains the identity until cleanup's last signal.
+    wait_without_reaping(process)
     try:
         os.killpg(process.pid, signal.SIGKILL)
     except ProcessLookupError:
         pass
+    except PermissionError:
+        # Darwin reports EPERM when only zombies remain. Verify that exact case;
+        # failed inspection or any live member must still fail cleanup visibly.
+        if sys.platform != "darwin" or not zombie_only_group(process.pid):
+            raise
     process.wait()
 
 

@@ -114,8 +114,12 @@ The helper does not call models, format, commit, discard, create logs or decide
 which tests establish acceptance. Commands inherit process permissions and may
 write files or use the network; this is **not a sandbox**. On timeout/interruption
 it terminates the command's process group, but descendants that escape that
-group are not contained. On normal command exit, background services are not
-stopped automatically; commands must own their cleanup. Run only authorized
+group are not contained. Cleanup keeps the group leader unreaped through the last
+signal to avoid reusing its process-group identity. On macOS, `ps` is used to
+confirm the kernel's zombie-only-group `EPERM` case; a live or uninspectable group
+still reports cleanup failure rather than silently ignoring permission errors.
+On normal command exit, background services are not stopped automatically;
+commands must own their cleanup. Run only authorized
 checks in an appropriate workspace. Verify collection and source state separately; a no-tests exit 0 is not qualified
 behavioral acceptance. Do not put secrets in command arguments or test output.
 
