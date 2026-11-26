@@ -33,8 +33,11 @@ Installation and invocation are described in [README.md](README.md).
   again; never label recommendations or silence as approval.
 - Work within authorized local actions. Paid model calls, additional agents,
   commits, discards, installation, remote changes and production actions require
-  applicable explicit authorization. Confirm authentication/billing source, exact
-  model commands, spending cap and stop conditions before paid unattended work.
+  applicable explicit authorization. Before paid work, establish the authorized
+  model routes, billing source, applicable spending control and stop conditions.
+  Carry forward applicable answers already given, including owner-confirmed
+  external caps. Do not ask again or require a duplicate local cap. External
+  enforcement does not itself authorize a new route or paid calls.
 - Do not install dependencies, bypass permissions or silently change models.
   A timeout or prompt instruction is not a monetary spending limit.
 - Protect accepted requirements and evaluation from implementation changes.
@@ -69,6 +72,33 @@ Keep material decisions and their rationale/status (proposed, approved, deferred
 superseded) concise in the README. Update the actual promises too. Use module
 READMEs or supporting schemas only where they resolve real ambiguity. Do not
 require an audit history of every implementation choice or a duplicate SPEC.
+
+### Required preflight: make the whole run executable
+
+Before implementation, walk every required acceptance check, including final
+integration, safety/failure cases and recovery. For each, identify what must run,
+what evidence would count, and what it needs: the exact host or environment,
+fixtures and services, toolchains and isolation, permitted data and model
+routes, and any approvals or time windows. Inspect what is actually available;
+an installed tool is not a provisioned environment, and a compile or simulated
+pass does not supply missing runtime evidence. Reuse established facts and do
+ordinary local discovery without asking. Keep this proportional: a few lines in
+the initial plan can be enough; no separate document is required.
+
+If anything essential is missing, **ask before starting the affected work**.
+Batch all known consequential gaps in one message. For each, say exactly what
+you propose to do or what the owner must provide, where and with what effects,
+and which acceptance check it unlocks. Recommend the smallest suitable option
+rather than asking the owner to design the environment. Distinguish your own
+implementation or setup work from an owner decision, execution permission, or
+resource only the owner can provide. A grant exercised inside the product under
+test is not permission to install, spend, access a host, or reboot it.
+
+If a gap remains open, say what is blocked and continue independent work within
+existing authority. If a new blocker appears, raise it promptly with a concrete
+request; do not save it for handoff. Do not quietly drop a required check or
+replace it with a weaker one. This preflight is not a new approval gate for
+routine work or a reason to ask again at each milestone.
 
 ## 2. Establish behavioral acceptance
 

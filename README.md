@@ -51,7 +51,10 @@ missing authority once, not again at each internal milestone.
 1. **Agree.** Discover root/module READMEs, resolve consequential ambiguity and
    establish the entire requested scope. Keep implementation freedom explicit.
    Separate existing behavior from desired promises and explicit future deferrals.
-   Do not substitute a smaller checkpoint for a whole-product request.
+   Do not substitute a smaller checkpoint for a whole-product request. Before
+   coding, check that every required acceptance step can run in its intended
+   environment. Ask in one message for missing consequential permissions or
+   resources, and raise newly discovered blockers promptly.
 2. **Establish acceptance.** The acceptance owner derives meaningful behavioral
    checks from the contract, including consequential failures and prohibited
    effects. Check that tests run and reject relevant incorrect behavior. Keep
@@ -128,8 +131,10 @@ behavioral acceptance. Do not put secrets in command arguments or test output.
 README approval is not permission for paid calls, extra agents, commits,
 discards, installation, remote changes or production access. Honor existing
 explicit permissions, preserve user work and stop affected work when additional
-authority is needed. Confirm billing source, owner-selected models and spending
-controls before unattended paid work. Do not bypass host permissions.
+authority is needed. Establish authorized billing routes, models, spending
+controls and stop conditions before paid work. Reuse applicable answers,
+including owner-confirmed external caps; do not ask for a duplicate cap.
+Do not bypass host permissions.
 
 Acceptance must cover meaningful effects without fixing incidental architecture.
 Path protection is not process isolation. Security-sensitive or destructive
