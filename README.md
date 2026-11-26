@@ -36,25 +36,30 @@ that GitHub contains unpublished local changes.
 Start a fresh agent session **in the project being built**, then ask:
 
 ```text
-/skill:readme-loop Read my README, propose one useful milestone and its
-acceptance checks, and ask only about consequential gaps. Do not build yet.
+/skill:readme-loop Build the software promised by my README. Resolve only
+consequential gaps, then implement and evaluate the full agreed scope.
+Use internal milestones without stopping for approval after each one.
 ```
 
 Use the invocation for your host. These are agent requests, not shell commands.
-An existing approved README/milestone does not need ritual reapproval.
+An existing approved README/scope does not need ritual reapproval. Discovery or
+README approval alone still does not supply execution permissions; obtain any
+missing authority once, not again at each internal milestone.
 
 ## The normal workflow
 
 1. **Agree.** Discover root/module READMEs, resolve consequential ambiguity and
-   agree on one useful scope. Keep implementation freedom explicit. Separate
-   existing behavior from desired promises; defer unrelated future questions.
+   establish the entire requested scope. Keep implementation freedom explicit.
+   Separate existing behavior from desired promises and explicit future deferrals.
+   Do not substitute a smaller checkpoint for a whole-product request.
 2. **Establish acceptance.** The acceptance owner derives meaningful behavioral
    checks from the contract, including consequential failures and prohibited
    effects. Check that tests run and reject relevant incorrect behavior. Keep
    accepted evaluation outside the implementer's authority to weaken.
-3. **Implement.** Build a coherent milestone with ordinary coding tools. Retain
-   useful context, run focused checks while editing and avoid fresh-agent
-   microtasks. Production architecture belongs to the implementer.
+3. **Implement.** Complete the agreed scope with ordinary coding tools. Internal
+   milestones organize progress but do not require repeated approval or trigger
+   partial delivery. Retain useful context, run focused checks while editing and
+   avoid fresh-agent microtasks. Production architecture belongs to the implementer.
 4. **Evaluate.** Run each required acceptance check once on the candidate, using
    public interfaces and representative examples. Repeat only to investigate
    instability, ordering or concurrency—not as an automatic quadratic gate.
@@ -62,6 +67,12 @@ An existing approved README/milestone does not need ritual reapproval.
    batch corrections and verify them. Deliver evidence, total economics and
    limitations. Serious unresolved defects block acceptance; minor findings do
    not automatically start another broad review loop.
+
+One invocation owns the work through the full agreed completion boundary,
+including evaluation, review and necessary corrections. Stop early only for an
+explicitly requested partial delivery, a real execution/budget limit, or a
+consequential contract/authority blocker. Report that state as partial or blocked,
+not complete. A green internal checkpoint is not a reason to hand work back.
 
 The operational instructions are in [SKILL.md](SKILL.md). This is an agent-guided
 workflow, not a README watcher or background orchestration service.
@@ -173,6 +184,7 @@ maintenance and limited benchmarks, not v0.2 validation or a comparative result.
 | README-first; independently owned behavioral acceptance; implementation freedom. | Preserve the useful distinction between intent, implementation and success. | Approved |
 | Lightweight default; references, kits and stronger verification justified by risk/reuse rather than universally required. | Optimize total engineering effort and time to value. Supersedes v0.1's mandatory preparation. | Approved |
 | Native checks, single-pass acceptance, bounded review/correction. | Remove routine repetition without treating incomplete evidence as success. Supersedes the default full legacy gate. | Approved |
+| One invocation completes the entire agreed scope; internal milestones are not automatic approval or delivery gates. | Preserve autonomous responsibility rather than stopping at the first working subset. | Approved |
 
 The source skill and optional helper are under local development. No v0.2 live
 implementation trial, controlled framework comparison or measured end-to-end

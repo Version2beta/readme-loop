@@ -1,6 +1,6 @@
 ---
 name: readme-loop
-description: Build or extend software from an agreed README, using useful implementation milestones and independently owned behavioral acceptance. Use for README discovery, clarification, implementation, evaluation and bounded corrective work. References and elaborate kits are optional, not prerequisites.
+description: Complete the agreed README scope in one invocation, with independently owned behavioral acceptance. Use for README discovery, clarification, implementation, evaluation and bounded corrective work. References and elaborate kits are optional, not prerequisites.
 license: MIT
 metadata:
   version: "0.2"
@@ -13,7 +13,11 @@ Optimize total engineering cost and time to a useful, adequately correct result,
 not coder cost, artifact count or verification volume in isolation.
 
 This is an independent workflow, not a front end to another specification loop.
-The default is **README → acceptance → implementation → evaluation → delivery**.
+The default is **README → acceptance → implementation → evaluation → delivery**
+for the entire agreed scope in one invocation. Internal milestones organize work;
+they are not automatic approval gates or permission to stop at a partial product.
+Narrow the deliverable only when the owner explicitly requests or approves that
+narrower scope. Progress reports do not transfer responsibility back to the owner.
 No dedicated specification, private reference implementation, task manifest,
 stubs, copied runner or new agent is required merely to use this skill.
 
@@ -25,7 +29,7 @@ Installation and invocation are described in [README.md](README.md).
 
 - Inspect applicable guidance and relevant Git state; preserve existing work.
 - A README is a candidate contract, not automatic approval. Obtain actual approval
-  of the milestone and changed promises. Honor existing approvals without asking
+  of the requested scope and changed promises. Honor existing approvals without asking
   again; never label recommendations or silence as approval.
 - Work within authorized local actions. Paid model calls, additional agents,
   commits, discards, installation, remote changes and production actions require
@@ -49,14 +53,17 @@ archive, generated or version-control trees. Do not follow links outside the
 project without direction. Identify the selected paths in the first response.
 
 Separate intended promises from current behavior and old implementation defects.
-Ask only questions that change the next milestone's observable behavior,
+Ask only questions that change the requested scope's observable behavior,
 compatibility, ownership, important failure semantics, feasibility or authority.
-Do not expand a small assignment into the ideal finished product.
+Do not expand a small assignment into the ideal finished product, or shrink a
+whole-product request to the first convenient transport, feature or checkpoint.
 
-Choose one useful milestone. State its scope, acceptance, important exclusions
-and local implementation freedom. Private packages, algorithms and internal types
-belong to the implementer; contractual APIs and observable effects do not.
-Leave independent future questions deferred, with a resolution point.
+State the full agreed scope, acceptance, explicitly deferred features and local
+implementation freedom. Private packages, algorithms and internal types belong
+to the implementer; contractual APIs and observable effects do not. Resolve only
+consequential contract gaps, not routine implementation choices. Once authorized,
+continue through implementation, evaluation and correction without asking the
+owner to approve each internal milestone.
 
 Keep material decisions and their rationale/status (proposed, approved, deferred,
 superseded) concise in the README. Update the actual promises too. Use module
@@ -89,7 +96,7 @@ fixtures or promises to make its implementation pass. Evidence requiring an
 acceptance correction returns to its owner; preserve the finding and re-evaluate
 without silently changing the meaning of success.
 
-## 3. Implement a coherent milestone
+## 3. Complete the agreed scope
 
 Use the host's ordinary coding tools and project-native build/test commands.
 Keep useful implementation context across edits; do not launch a fresh model
@@ -121,7 +128,7 @@ snapshots/external fixtures where required and inspect relevant final state.
 Run representative user-facing behavior, not just compilation. Judge only what
 was actually exercised; simulation and source review are not live integration.
 
-For a meaningful milestone, seek one bounded independent review when authorized,
+At the agreed completion boundary, seek one bounded independent review when authorized,
 focusing on requirements, consequential failures and acceptance gaps. Independent
 review needs a separate execution context; self-review is not independent, and
 same-model correlation remains a limitation. Do not launch reviewers without
@@ -131,12 +138,15 @@ Batch findings into one correction pass and recheck the affected guarantees plus
 necessary regression coverage. Further broad review requires a material reason,
 not merely another minor finding. A serious unresolved defect blocks acceptance;
 a review/correction limit is not permission to ship it. Record low-impact or
-unrelated improvements without extending the milestone indefinitely.
+unrelated improvements without extending the assignment indefinitely.
 
-Stop when the milestone meets its agreed acceptance/review boundary, when an
-explicit time/spend/retry limit is reached, or when safe progress requires a
-contract decision. Report partial/blocked work honestly; do not spend the budget
-merely because it remains available.
+Finish only when the entire agreed scope meets its acceptance/review boundary.
+Stop early only at an explicit owner-requested partial-delivery boundary, an
+execution/time/spend/retry limit, or a consequential decision/authority gap that
+blocks safe progress. Report such work as partial or blocked, never complete.
+Do not stop merely because an internal milestone passed. Use host-supported
+continuation within existing authority when context needs refreshing; do not
+invent a new approval gate. Do not spend merely because budget remains.
 
 ## 5. Deliver evidence and economics, not ceremony
 
@@ -150,7 +160,7 @@ Use one concise handoff in an existing record or response:
   estimates, billing reservations and reported costs separately.
 - Deferred decisions, permissions still needed and the smallest next useful step.
 
-Do not add a telemetry platform to measure one milestone. Do not infer economic
+Do not add a telemetry platform to measure one assignment. Do not infer economic
 superiority from cheap coding, passing tests or one successful assignment.
 
 ## Selective escalation
@@ -179,4 +189,4 @@ Old v0.1 projects may already contain `tasks.json`, `SPEC.md` and `loop.sh`.
 Do not silently migrate them, reinterpret their acceptance or launch their
 automatic commit/discard loop. Their historical format is documented in
 [references/kit-format.md](references/kit-format.md). It is not the new default;
-new readme-loop milestones do not depend on that format or another project.
+new readme-loop assignments do not depend on that format or another project.
