@@ -3,6 +3,7 @@ name: Legacy runner compatibility
 on:
   workflow_dispatch:
   push:
+    branches: [main]
     paths:
       - 'scripts/loop.sh'
       - 'scripts/test_loop.sh'
@@ -10,6 +11,8 @@ on:
       - 'tests/fakecoder.sh'
       - 'tests/test_kit_format.py'
       - 'tests/test_runner_config.py'
+      - 'tests/literal_replace.py'
+      - 'tests/test_literal_replace.py'
       - 'tests/toy-kit/**'
       - 'tests/toy-ref/**'
       - '.github/workflows/legacy.yml'
@@ -21,13 +24,19 @@ on:
       - 'tests/fakecoder.sh'
       - 'tests/test_kit_format.py'
       - 'tests/test_runner_config.py'
+      - 'tests/literal_replace.py'
+      - 'tests/test_literal_replace.py'
       - 'tests/toy-kit/**'
       - 'tests/toy-ref/**'
       - '.github/workflows/legacy.yml'
 permissions:
   contents: read
+concurrency:
+  group: legacy-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
 jobs:
   test:
+    timeout-minutes: 15
     strategy:
       matrix:
         os: [ubuntu-latest, macos-latest]
@@ -54,12 +63,20 @@ jobs:
           bash -n scripts/loop.sh scripts/test_loop.sh tests/run.sh tests/fakecoder.sh
           python3 tests/test_kit_format.py
           python3 tests/test_runner_config.py
+          python3 tests/test_literal_replace.py
       - name: Legacy runner fixtures and deliberate regressions
+        timeout-minutes: 8
         env:
           GIT_CONFIG_NOSYSTEM: '1'
           GIT_CONFIG_GLOBAL: /dev/null
           GOPROXY: 'off'
           GOTOOLCHAIN: local
-        run: |
-          bash scripts/test_loop.sh
-          bash tests/run.sh
+        run: bash scripts/test_loop.sh
+      - name: Toy Go integration
+        timeout-minutes: 5
+        env:
+          GIT_CONFIG_NOSYSTEM: '1'
+          GIT_CONFIG_GLOBAL: /dev/null
+          GOPROXY: 'off'
+          GOTOOLCHAIN: local
+        run: bash tests/run.sh

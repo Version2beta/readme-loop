@@ -176,8 +176,12 @@ bash scripts/test_loop.sh
 bash tests/run.sh
 ```
 
-They require Git, jq and timeout/gtimeout; the toy suite also requires Go and
-Perl. The [development review](references/development-review.md) records earlier
+They require Git, jq, Python 3 and timeout/gtimeout; the toy suite also requires
+Go and Perl. Mutation preparation uses a guarded literal byte replacement rather
+than Bash 3.2's slow multibyte pattern replacement. All real/mutated cases retain
+their assertions, each case has a 45-second outer deadline, and outer timeouts do
+not qualify a mutation as caught. CI separates fixture and toy steps, reports
+case progress, and caps the legacy job at 15 minutes. The [development review](references/development-review.md) records earlier
 maintenance and limited benchmarks, not v0.2 validation or a comparative result.
 
 ## Decisions and status

@@ -28,6 +28,7 @@ jobs:
           bash -n scripts/install.sh
           python3 tests/test_install.py
           python3 tests/test_check.py
+          python3 tests/test_literal_replace.py
           python3 tests/test_kit_format.py
       - name: Package and test the distribution
         run: |
@@ -36,6 +37,7 @@ jobs:
           tar -xzf readme-loop.tar.gz -C unpacked
           python3 unpacked/tests/test_install.py
           python3 unpacked/tests/test_check.py
+          python3 unpacked/tests/test_literal_replace.py
           python3 unpacked/tests/test_kit_format.py
       - uses: actions/upload-artifact@v4
         with:

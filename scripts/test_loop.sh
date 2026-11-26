@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # Real-loop regression tests. No models/network. Requires the loop's existing
-# bash/git/jq/coreutils dependencies, not Go, pytest or Elixir.
+# bash/git/jq/coreutils dependencies plus Python 3 for literal mutation preparation.
+# No Go, pytest, Elixir, or model calls.
 # Each case is also run against a deliberately regressed disposable loop copy.
 set -euo pipefail
 here=$(cd "$(dirname "$0")" && pwd)
@@ -837,17 +838,22 @@ fi
 # guards prevent a stale mutation from silently becoming a no-op.
 mutate() {
   local old=$1 new=$2
-  [[ $source == *"$old"* ]] || fail "mutation anchor absent: $old"
-  source=${source/"$old"/"$new"}
+  # Bash 3.2's multibyte pattern replacement can take minutes on this script.
+  # Use exact bytes, not shell patterns, and fail if a mutation becomes a no-op.
+  source=$(printf '%s' "$source" | python3 "$here/../tests/literal_replace.py" "$old" "$new")
 }
 cases=(search-count notes notes-cross-task judge-writes formatter-protected good formatted protected substring stderr nonzero hang empty-command empty-expect missing-expect legacy untracked defaults hard escalation check-format check-command earlier timeout-format timeout-format-check timeout-check check-once check-once-metadata check-once-select check-once-gates custom-tasks-plus custom-tasks-dot custom-tasks-absolute check-mutation check-once-mutation timeout-ignores-term coder-ignores-term task-nul empty-override blank-command newline-expect rename-protected quoted-protected gitignore-edit coder-timeout protected-window check-untracked unreadable-snapshot index-flags index-flags-skip index-flag-startup index-flags-both index-flag-both-startup judge-flag ignored-discard ignored-pass-warning ignored-protected quoted-discard newline-discard plusplus-note attempts-corrupt blank-kit-command glob-pathspec newline-index-flag-startup newline-index-flag ignore-rule-outside empty-pass subdir-start newline-protected ignored-protected-preexisting all-pass-start format-after-timeout)
 fails=0
 for name in "${cases[@]}"; do
-  if bash "$0" --case "$name" "$loop" > "$work/case.log" 2>&1; then
-    printf 'PASS  %s\n' "$name"
+  printf 'RUN   real case: %s\n' "$name"
+  started=$SECONDS
+  if "$outer_timeout" -k 2 45 bash "$0" --case "$name" "$loop" > "$work/case.log" 2>&1; then
+    printf 'PASS  %s (%ss)\n' "$name" "$((SECONDS - started))"
   else
     printf 'FAIL  %s\n' "$name"; cat "$work/case.log"; fails=$((fails + 1))
   fi
+  printf 'RUN   mutation: %s\n' "$name"
+  started=$SECONDS
   source=$(<"$loop")
   case $name in
     search-count) mutate 'do task_passes "$i" || { echo "$i"; return; }; done' 'do judge "$i" || { echo "$i"; return; }; done';;
@@ -951,11 +957,17 @@ $untracked"' ':'
     subdir-start) mutate '[ -z "$(git rev-parse --show-prefix)" ] || die "run from the repository top level, not a subdirectory"' ':';;
   esac
   printf '%s\n' "$source" > "$work/regressed.sh"
-  if bash "$0" --case "$name" "$work/regressed.sh" > "$work/mutation.log" 2>&1; then
+  if "$outer_timeout" -k 2 45 bash "$0" --case "$name" "$work/regressed.sh" > "$work/mutation.log" 2>&1; then
     printf 'FAIL  mutation survived: %s\n' "$name"; fails=$((fails + 1))
   else
-    printf 'CAUGHT old-behavior regression: %s — ' "$name"
-    grep -m1 'ASSERTION FAILED:' "$work/mutation.log" || { cat "$work/mutation.log"; fails=$((fails + 1)); }
+    mutation_rc=$?
+    if [ "$mutation_rc" = 1 ] && grep -q 'ASSERTION FAILED:' "$work/mutation.log"; then
+      printf 'CAUGHT old-behavior regression: %s (%ss) — ' "$name" "$((SECONDS - started))"
+      grep -m1 'ASSERTION FAILED:' "$work/mutation.log"
+    else
+      printf 'FAIL  unqualified mutation failure: %s (exit %s)\n' "$name" "$mutation_rc"
+      cat "$work/mutation.log"; fails=$((fails + 1))
+    fi
   fi
 done
 [ "$fails" = 0 ] || { printf '%s checks failed\n' "$fails"; exit 1; }
