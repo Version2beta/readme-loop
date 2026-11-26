@@ -18,7 +18,7 @@ def main(argv=None):
     try:
         result = replace_first(sys.stdin.buffer.read(), os.fsencode(args[0]), os.fsencode(args[1]))
     except ValueError as exc:
-        print("ASSERTION FAILED:", exc, file=sys.stderr)
+        print("MUTATION PREPARATION FAILED:", exc, file=sys.stderr)
         return 1
     sys.stdout.buffer.write(result)
     return 0

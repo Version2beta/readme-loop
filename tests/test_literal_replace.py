@@ -29,7 +29,8 @@ class LiteralReplaceTests(unittest.TestCase):
                 result = self.run_replace(b"unchanged", anchor, "new")
                 self.assertNotEqual(result.returncode, 0)
                 self.assertEqual(result.stdout, b"")
-                self.assertIn(b"ASSERTION FAILED", result.stderr)
+                self.assertIn(b"MUTATION PREPARATION FAILED", result.stderr)
+                self.assertNotIn(b"ASSERTION FAILED", result.stderr)
 
 
 if __name__ == "__main__":

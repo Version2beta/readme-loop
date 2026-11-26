@@ -424,11 +424,9 @@ SH
 cat >/dev/null
 SH
       git add fake.sh && git commit -qm 'coder makes no change'
-      src=$(<"$loop"); anchor='revert_protected # Formatting must not change protected paths either.'
-      [[ $src == *"$anchor"* ]] || fail 'window anchor absent'
+      anchor='revert_protected # Formatting must not change protected paths either.'
       new=$anchor$'\n'"  echo 'echo PASS T1' > verify.sh"
-      src=${src/"$anchor"/"$new"}  # no outer quotes: nested quoting here varies by bash version
-      printf '%s\n' "$src" > "$work/window.sh"
+      python3 "$here/../tests/literal_replace.py" "$anchor" "$new" < "$loop" > "$work/window.sh"
       before=$(git rev-list --count HEAD); original=$(git show HEAD:verify.sh)
       rc=0; MAX_ATTEMPTS=2 bash "$work/window.sh" > "$work/output" 2>&1 || rc=$?
       equal "$rc" 2 'protected write before the snapshot stops the run'
@@ -840,7 +838,8 @@ mutate() {
   local old=$1 new=$2
   # Bash 3.2's multibyte pattern replacement can take minutes on this script.
   # Use exact bytes, not shell patterns, and fail if a mutation becomes a no-op.
-  source=$(printf '%s' "$source" | python3 "$here/../tests/literal_replace.py" "$old" "$new")
+  python3 "$here/../tests/literal_replace.py" "$old" "$new" < "$work/regressed.sh" > "$work/mutation.next"
+  mv "$work/mutation.next" "$work/regressed.sh"
 }
 cases=(search-count notes notes-cross-task judge-writes formatter-protected good formatted protected substring stderr nonzero hang empty-command empty-expect missing-expect legacy untracked defaults hard escalation check-format check-command earlier timeout-format timeout-format-check timeout-check check-once check-once-metadata check-once-select check-once-gates custom-tasks-plus custom-tasks-dot custom-tasks-absolute check-mutation check-once-mutation timeout-ignores-term coder-ignores-term task-nul empty-override blank-command newline-expect rename-protected quoted-protected gitignore-edit coder-timeout protected-window check-untracked unreadable-snapshot index-flags index-flags-skip index-flag-startup index-flags-both index-flag-both-startup judge-flag ignored-discard ignored-pass-warning ignored-protected quoted-discard newline-discard plusplus-note attempts-corrupt blank-kit-command glob-pathspec newline-index-flag-startup newline-index-flag ignore-rule-outside empty-pass subdir-start newline-protected ignored-protected-preexisting all-pass-start format-after-timeout)
 fails=0
@@ -854,7 +853,7 @@ for name in "${cases[@]}"; do
   fi
   printf 'RUN   mutation: %s\n' "$name"
   started=$SECONDS
-  source=$(<"$loop")
+  cp "$loop" "$work/regressed.sh"
   case $name in
     search-count) mutate 'do task_passes "$i" || { echo "$i"; return; }; done' 'do judge "$i" || { echo "$i"; return; }; done';;
     notes|notes-cross-task) mutate 'cat "$notes"' ': # discard saved prompt notes';;
@@ -956,7 +955,6 @@ $untracked"' ':'
     format-after-timeout) mutate 'if [ -n "$FORMAT_CMD" ] && [ "$ok" = 1 ]; then' 'if [ -n "$FORMAT_CMD" ]; then';;
     subdir-start) mutate '[ -z "$(git rev-parse --show-prefix)" ] || die "run from the repository top level, not a subdirectory"' ':';;
   esac
-  printf '%s\n' "$source" > "$work/regressed.sh"
   if "$outer_timeout" -k 2 45 bash "$0" --case "$name" "$work/regressed.sh" > "$work/mutation.log" 2>&1; then
     printf 'FAIL  mutation survived: %s\n' "$name"; fails=$((fails + 1))
   else
