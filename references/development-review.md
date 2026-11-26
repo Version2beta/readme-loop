@@ -340,7 +340,9 @@ Behaviour changes a reader should know about:
   is matched as one name. A name such as `x<LF>PROMPT.md` was protected before only
   because its second line matched; it is a different file and is not protected now.
 - A run stops with exit 1 before any coder launch when a protected path is git-ignored
-  before the attempt. The message names the first such path.
+  before the attempt. The message names the first such path. This also covers a protected
+  ignored file that the kit's own test commands created before the attempt began; such a kit
+  now stops instead of running.
 - A run that starts with every task passing logs that `format_check` and `check` were
   not run. Its exit status is still 0.
 - A formatter does not run after a coder timeout.
@@ -348,18 +350,22 @@ Behaviour changes a reader should know about:
 ### Performance (fourth continuation)
 
 Attempt path: one passing attempt with a fake coder per run (`MAX_ITER=1`, so the run stops
-at the cap after its commit; each run was checked to contain exactly one new commit). Disposable
+at the cap after its commit; the commit count was spot-checked on sample runs of each scenario, not on every run). Disposable
 repositories under `/tmp/rl-exp5`, three runs each, `/tmp/rl-exp5/bin/bench.sh` (not committed).
 The machine was shared with an unrelated running loop, so these figures are indicative.
 
 | Files the attempt touches | `623e758` (s) | Working tree (s) |
 | --- | --- | --- |
-| none | 0.367, 0.378, 0.384 | 0.365, 0.401, 0.360 |
-| 2,000 untracked files created by the coder | 14.935, 14.644, 16.651 | 0.791, 0.681, 0.719 |
-| 20,000 git-ignored, unprotected files present before the attempt | 0.566, 0.538, 0.604 | 1.199, 1.119, 1.182 |
+| none | 0.367, 0.378, 0.384 | 0.382, 0.396, 0.378 |
+| 2,000 untracked files created by the coder | 14.935, 14.644, 16.651 | 0.775, 0.914, 0.851 |
+| 20,000 git-ignored, unprotected files present before the attempt | 0.566, 0.538, 0.604 | 1.149, 1.124, 1.154 |
+
+The HEAD figures were taken on an earlier run; the working-tree figures are from the final
+`loop.sh` (SHA-256 `7af8f469…`). A first working-tree run before the subshell fix (below) gave
+0.365/0.401/0.360, 0.791/0.681/0.719 and 1.199/1.119/1.182 s.
 
 Matching a changed name no longer starts a `grep` process per name, which made the 2,000-file
-attempt about 20 times faster (median 14.9 s to 0.7 s). The new refusal checks every
+attempt about 17 times faster (median 14.9 s to 0.85 s). The new refusal checks every
 pre-existing ignored name once per attempt in bash: about 0.6 s at 20,000 names (roughly
 30 µs each), growing linearly with the number of ignored files. With no ignored files it
 adds no measurable time.
@@ -368,12 +374,13 @@ Orchestration benchmark (`tests/benchmark_loop.py`, 40 no-op tasks, three runs e
 
 | Runner | `--check-once` median (runs) | `--check` median (runs) |
 | --- | ---: | ---: |
-| `623e758` | 0.543 s (0.504, 0.543, 0.547) | 6.559 s (6.559, 7.074, 6.123) |
-| working tree | 0.565 s (0.565, 0.708, 0.542) | 7.025 s (7.025, 7.055, 6.950) |
+| `623e758` (run back to back with the next row) | 0.555 s (0.585, 0.555, 0.554) | 6.394 s (6.572, 6.296, 6.394) |
+| working tree (final `loop.sh`) | 0.568 s (0.568, 0.544, 0.587) | 6.282 s (6.265, 6.424, 6.282) |
 
-Check-only modes call none of the changed functions. On this shared machine the medians differ
-by about the run-to-run spread. This is not a measured regression, and it does not prove that
-check timing is unchanged.
+Check-only modes call none of the changed functions. In this paired run the medians differ by
+less than the run-to-run spread (the first pair, taken earlier on the same shared machine, gave
+0.543 s and 6.559 s for `623e758`, and 0.565 s and 7.025 s for the pre-fix working tree). This is
+not a measured regression, and it does not prove that check timing is unchanged.
 
 Not measured: coder time, application test time, Linux, GNU `grep` and `timeout`, ignored trees
 larger than 20,000 files, and the cost of a protected file that the attempt itself creates.
@@ -390,17 +397,23 @@ larger than 20,000 files, and the cost of a protected file that the attempt itse
   (the message is absent) and `format-after-timeout` (the formatter ran). Each passes on the
   working tree.
 - Each new case has a mutant, a disposable copy with the old behaviour restored. All 72 mutants
-  were caught in the final run. The `formatted` and `custom-tasks-*` mutant anchors were updated
-  to the new text. A first full run stopped at the `custom-tasks-*` anchor (`mutation anchor
+  were caught in the final run. The `formatted`, `custom-tasks-*` and `ignored-protected-preexisting`
+  mutant anchors were updated to the new text. A first full run stopped at the `custom-tasks-*` anchor (`mutation anchor
   absent`, `EXIT=1`, `/tmp/rl-exp5/suite-1.log`). That run is not counted.
-- `bash scripts/test_loop.sh` on the final files (`scripts/loop.sh` SHA-256 `aef6a196…`,
-  `scripts/test_loop.sh` SHA-256 `91709bc6…`): **72/72 cases passed, 72/72 regressions caught,
-  exit 0** (`/tmp/rl-exp5/suite-2.log`). The four new cases are `newline-protected`,
-  `ignored-protected-preexisting`, `all-pass-start` and `format-after-timeout`.
-- `python3 -I tests/test_install.py`, `tests/test_kit_format.py` and `tests/test_runner_config.py`:
-  each exit 0 (`OK`).
+- Self-review before the final run found one defect in my own change: the refusal called
+  `first_protected` inside `$( )`, so a `die` in that subshell would not stop the run. It is
+  now a direct call that sets `PROTECTED_FOUND`. The status-2 branch of `is_protected` is
+  defensive only: I probed candidate patterns on this machine and found none that grep accepts
+  and bash rejects, so no regression exercises it. Its code path was not run.
+- `bash scripts/test_loop.sh` on the final files (`scripts/loop.sh` SHA-256 `7af8f469…`,
+  `scripts/test_loop.sh` SHA-256 `fa42cf9f…`): **72/72 cases passed, 72/72 regressions caught,
+  exit 0** (`/tmp/rl-exp5/suite-3.log`). An earlier run on the pre-fix runner (`aef6a196…`,
+  `/tmp/rl-exp5/suite-2.log`) also passed 72/72 and is superseded. The four new cases are
+  `newline-protected`, `ignored-protected-preexisting`, `all-pass-start` and `format-after-timeout`.
+- `python3 -I tests/test_install.py`, `tests/test_kit_format.py` and `tests/test_runner_config.py`
+  on the final files: each exit 0 (`OK`).
 - `tests/run.sh` (Go toy kit) with `GOPROXY=off`, `GOTOOLCHAIN=local` and temporary `GOCACHE` and
-  `GOMODCACHE`: 13 `ok`, exit 0.
+  `GOMODCACHE` on the final files: 13 `ok`, exit 0.
 - `/bin/bash -n` on `scripts/loop.sh`, `scripts/test_loop.sh`, `scripts/install.sh`, `tests/run.sh`
   and `tests/fakecoder.sh`: passed. `git diff --check`: clean.
 - Whole-name matching was compared with the old line-based grep on sample names
@@ -688,8 +701,8 @@ case is valid for this user); no live coder, no live kit, no model calls. The
 - Third continuation (base `3473942`, final files): `scripts/loop.sh` `0fe0f14b13c12e0a2b19295f55147c444db5390ac7fab9e9b24e7616d2021e64`; `scripts/test_loop.sh` `3e97dc7fe4f93ceb4002704f019904f1eeed705f8f2240748d9e4a2c69549a2f`. Changed: `scripts/loop.sh`, `scripts/test_loop.sh`, `SKILL.md`, `README.md` (count only), this report.
 - Fourth continuation (base `623e758`, which follows `816f36f`): changed files `scripts/loop.sh`,
   `scripts/test_loop.sh`, `SKILL.md`, `README.md` (case count), this report. SHA-256 of the final
-  files (the validated 72-case run): `scripts/loop.sh` `aef6a19667b3f0c5e35bab06d48ac9a6f95a406dd7321487508c464ee3c5b2b5`;
-  `scripts/test_loop.sh` `91709bc6f7f40dcf5707e576af231d84ea84cda068bccd96ae8d09ba0a5ffff1`.
+  files (the validated 72-case run): `scripts/loop.sh` `7af8f469281773f415ae6edf8f613e13c1bf1a17f7282c8cf8b535d9e46328e7`;
+  `scripts/test_loop.sh` `fa42cf9fbd67506d3bb08390793fd3b1305de1957bc29fa708498d2b0e0429e3`.
   The commit is recorded in `git log`.
 - Untracked `ARTICLE-DRAFT.md` left untouched and not committed.
 - Not merged to `main`; pending independent review. No remote operation.

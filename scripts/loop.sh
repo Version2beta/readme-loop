@@ -329,11 +329,12 @@ is_protected() {
   [ "$rc" != 2 ] || die "could not match protected patterns: $PROTECTED"
   [ "$rc" = 0 ] || [ "$1" = "$tasks_rel" ]
 }
-# Prints the first NUL-delimited name in $1 that is protected; returns 1 if none is.
+# Sets PROTECTED_FOUND to the first NUL-delimited name in $1 that is protected; returns 1 if none is.
+# Call it directly, never in a command substitution: a die inside a subshell would not stop the run.
 first_protected() {
   local f
   while IFS= read -r -d '' f; do
-    if is_protected "$f"; then printf '%s\n' "$f"; return 0; fi
+    if is_protected "$f"; then PROTECTED_FOUND=$f; return 0; fi
   done < "$1"
   return 1
 }
@@ -408,8 +409,8 @@ for ((iter = 1; iter <= MAX_ITER; iter++)); do
   # the attempt is counted or the coder runs. The listing is taken here: nothing in the
   # worktree changes between this point and the coder launch.
   list_ignored "$state/ignored.before" || die "could not list ignored files"
-  if pf=$(first_protected "$state/ignored.before"); then
-    die "protected path is git-ignored before the attempt: $pf (un-ignore or move it, or stop protecting it)"
+  if first_protected "$state/ignored.before"; then
+    die "protected path is git-ignored before the attempt: $PROTECTED_FOUND (un-ignore or move it, or stop protecting it)"
   fi
   id=$(task "$idx" id); tier=$(task "$idx" tier)
   prev=$(cat "$state/attempts.$id" 2>/dev/null || echo 0)

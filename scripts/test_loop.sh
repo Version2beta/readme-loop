@@ -945,7 +945,7 @@ $untracked"' ':'
   [ "$rc" != 2 ] || die "could not match protected patterns: $PROTECTED"
   [ "$rc" = 0 ] || [ "$1" = "$tasks_rel" ]
 }' 'is_protected() { grep -qE -- "$PROTECTED" <<< "$1" || [ "$1" = "$tasks_rel" ]; }';;
-    ignored-protected-preexisting) mutate 'if pf=$(first_protected "$state/ignored.before"); then' 'if false; then';;
+    ignored-protected-preexisting) mutate 'if first_protected "$state/ignored.before"; then' 'if false; then';;
     all-pass-start) mutate 'log "every task passes; format_check and check were not run (run --check to run them)"' 'log "every task passes"';;
     format-after-timeout) mutate 'if [ -n "$FORMAT_CMD" ] && [ "$ok" = 1 ]; then' 'if [ -n "$FORMAT_CMD" ]; then';;
     subdir-start) mutate '[ -z "$(git rev-parse --show-prefix)" ] || die "run from the repository top level, not a subdirectory"' ':';;
