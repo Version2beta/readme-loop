@@ -1,4 +1,4 @@
-name: Validate skill
+name: Validate lightweight skill
 on:
   push:
   pull_request:
@@ -8,48 +8,33 @@ jobs:
   test:
     strategy:
       matrix:
-        os: [ubuntu-latest, macos-latest]
+        include:
+          - os: ubuntu-latest
+            python: '3.9'
+          - os: ubuntu-latest
+            python: '3.x'
+          - os: macos-latest
+            python: '3.x'
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
-          python-version: '3.x'
-      - uses: actions/setup-go@v5
-        with:
-          go-version: '1.24.x'
-          cache: false
-      - name: Install test prerequisites
+          python-version: ${{ matrix.python }}
+      - name: Check packaging and single-pass helper (no models)
         run: |
-          if [ "$RUNNER_OS" = macOS ]; then
-            brew install jq coreutils
-          else
-            sudo apt-get update
-            sudo apt-get install -y jq
-          fi
-      - name: Check shell syntax and installation
-        run: |
-          bash -n scripts/install.sh scripts/loop.sh scripts/test_loop.sh tests/run.sh tests/fakecoder.sh
+          bash -n scripts/install.sh
           python3 tests/test_install.py
+          python3 tests/test_check.py
           python3 tests/test_kit_format.py
-          python3 tests/test_runner_config.py
-      - name: Runner regression tests (fake coders only)
-        env:
-          GIT_CONFIG_NOSYSTEM: '1'
-          GIT_CONFIG_GLOBAL: /dev/null
-          GOPROXY: 'off'
-          GOTOOLCHAIN: local
-        run: |
-          bash scripts/test_loop.sh
-          bash tests/run.sh
       - name: Package and test the distribution
         run: |
           tar -czf readme-loop.tar.gz SKILL.md README.md references scripts tests
           mkdir unpacked
           tar -xzf readme-loop.tar.gz -C unpacked
           python3 unpacked/tests/test_install.py
+          python3 unpacked/tests/test_check.py
           python3 unpacked/tests/test_kit_format.py
-          python3 unpacked/tests/test_runner_config.py
       - uses: actions/upload-artifact@v4
         with:
           name: readme-loop-${{ matrix.os }}

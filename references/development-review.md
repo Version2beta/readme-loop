@@ -1,4 +1,9 @@
-# Bounded development review
+# Historical v0.1 development review
+
+This record preserves the earlier maintenance campaign, its findings and evidence.
+It is not the v0.2 workflow contract, a current validation report, or evidence of
+end-to-end economic superiority. See [README.md](../README.md) for current scope.
+The underlying dispositions and measurements below are retained as history.
 
 ## Authority, scope and independent review
 

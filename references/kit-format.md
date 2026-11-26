@@ -1,4 +1,8 @@
-# Kit format
+# Legacy v0.1 kit format
+
+Historical compatibility documentation, not the v0.2 readme-loop workflow.
+New milestones follow [the current skill](../SKILL.md); no kit is required.
+Existing kits retain their original schema and acceptance semantics below.
 
 ## Layout
 

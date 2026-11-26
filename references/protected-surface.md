@@ -1,4 +1,7 @@
-# Protected-surface review template
+# Legacy v0.1 protected-surface review template
+
+This is retained for existing kits, not a mandatory v0.2 artifact. New milestones
+use the proportional acceptance guidance in [SKILL.md](../SKILL.md).
 
 Copy this review into a protected section of the kit's `SPEC.md`. Complete it
 before kit acceptance, handoff, or any separately authorized commit. Repeat for
