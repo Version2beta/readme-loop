@@ -373,7 +373,8 @@ the kit's language/check tools. Do not install prerequisites without permission.
   paths again, record the tree, then judge `format_check`, this task, earlier
   tasks and `check`. Optional top-level commands are skipped only if absent.
   Protected matching uses NUL-delimited Git paths with rename detection off, so
-  quoted (non-ASCII) or renamed names cannot escape restoration. If a coder breaks
+  quoted (non-ASCII) or renamed names cannot escape restoration. Each complete name
+  is matched as a whole, so a pattern can also span a newline inside a name. If a coder breaks
   the `.loop/` ignore rule, `.gitignore` is restored from HEAD before snapshots.
   If `.loop/` is still not ignored after that (for example, because a rule in
   `.git/info/exclude` was removed), the run stops before judging or committing anything.
@@ -396,7 +397,10 @@ the kit's language/check tools. Do not install prerequisites without permission.
   clean checkout. A pass that leaves the tree unchanged is a failed attempt, not a
   commit. `git add -A` includes legitimate attempt-created new files.
   Ignored files are not part of that tree. Ignored files created by the attempt
-  that match a protected pattern are removed before judging. Other ignored files
+  that match a protected pattern are removed before judging. A protected path that
+  git ignores before an attempt starts stops the run before the coder is launched:
+  the coder could edit it in place, and the judge would pass on an edit that no
+  commit contains (development review, deferred decision 20). Other ignored files
   created by the attempt are logged as not committed, but kept after a pass. Whether
   judging may depend on such files is an open owner decision (development
   review, deferred decision 14).
@@ -423,9 +427,13 @@ the kit's language/check tools. Do not install prerequisites without permission.
   Every formatter, format check, task test (including diagnostic probes) and
   kit check is timed. Timeouts fail attempts, including a coder timeout whatever
   partial work it left, and log the command; a command
-  that ignores SIGTERM is killed 5 seconds after its timeout. The runner
+  that ignores SIGTERM is killed 5 seconds after its timeout. A timed-out coder's
+  partial output is neither formatted nor judged. The runner
   stops at all tasks passing, a task's attempt limit (`STOP` names it), or the
-  iteration cap; partial progress is not completion.
+  iteration cap; partial progress is not completion. A run that starts with every
+  task already passing commits nothing, so it does not run `format_check` or `check`;
+  its log says so. Whether it should run them is an open owner decision (development
+  review, deferred decision 19).
 
 ### Claude Code and Codex hosts
 
@@ -509,7 +517,7 @@ Approve the next layer inline, then prepare and reverify the next kit.
 ## Local maintenance checks
 
 After inspecting the scripts, run `bash scripts/test_loop.sh` for the inherited
-fake-coder regression suite (68 cases and deliberate mutations). Optionally run
+fake-coder regression suite (72 cases and deliberate mutations). Optionally run
 `bash tests/run.sh` for the inherited Go toy kit; it also requires Go and Perl.
 Both use disposable fixture Git repositories only, never a real kit or model.
 Keep these tests and the local runner self-contained. Compare runner and format
@@ -517,6 +525,6 @@ bytes with the recorded source before claiming unchanged reuse; the runner now
 differs from spec-loop by `--check-once`, fixed-task metadata and expectation
 caching, check-only tree-change detection, exact task-file protection,
 NUL-delimited rename-free protected matching, `.loop/` ignore-rule restoration,
-index-flag clearing (NUL-delimited, so newline names are included), removal of ignored files on discard, kill-after timeouts, a stop when `.loop/` is still unignored after restoration, top-level-only starts, and no-change passes treated as failed attempts. Installation,
+index-flag clearing (NUL-delimited, so newline names are included), removal of ignored files on discard, kill-after timeouts, a stop when `.loop/` is still unignored after restoration, top-level-only starts, no-change passes treated as failed attempts, whole-name protected matching, a refusal for git-ignored protected paths, and no formatter run after a coder timeout. Installation,
 startup discovery and a live workflow trial are separate checks, not implied by
 these packaging tests.

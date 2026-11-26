@@ -4,7 +4,9 @@
 
 Branch `overnight-reliability-performance`. The first two rounds below used base
 `a1f9daa`. The first continuation starts from `816f36f`, the base of the final
-review. The second continuation starts from `7496c6f` (the first continuation's commit). Local edits, tests and commits only: no push, release, dependency install,
+review. The second continuation starts from `7496c6f` (the first continuation's commit).
+The third and fourth continuations start from `3473942` and `623e758` (each the previous
+continuation's head). Local edits, tests and commits only: no push, release, dependency install,
 installed-skill change, production or SIE access, agent, model/API or CLI model
 call, and no nested job. This session may not start model calls, so all paid work
 must go through the owner's controller. `ARTICLE-DRAFT.md` is untracked, was not
@@ -311,6 +313,117 @@ Only the fake coder in `/tmp` fixtures was used.
   of this commit has been run. The findings it raised are answered here, not verified by
   an independent reviewer.
 
+## Fourth continuation from `623e758`: review-5 findings
+
+Source: the read-only review of the continuation head (private result
+`continuation/runner-review-5.json`; its verdict and finding text were read, and no other
+fields). The reviewer ran nothing and made no edits. It is of the same model family as
+the writer, so it is an input to this work, not an independent review of the changes below.
+Its findings were treated as hypotheses. Each was reproduced first on the HEAD runner
+(`623e758` `scripts/loop.sh`, SHA-256 `0fe0f14b…`) in disposable fixtures under
+`/tmp/rl-exp5` (`/tmp/rl-exp5/bin/repro.sh`, not committed), with a scripted fake coder and
+no model. Each regression case added here was also run on the HEAD runner and fails there
+for its stated reason.
+
+| # | Finding | Reproduced on `623e758` | Disposition |
+| --- | --- | --- | --- |
+| C1 (medium) | Protected matching is line-based. A pattern that spans a newline cannot match a name containing one, so the file escapes restoration. | **Yes.** `^testdata/.*\.golden$` and a coder that creates `testdata/a<LF>b.golden` and passes the test: rc 0, the file is committed. | **Fixed.** `is_protected` matches the complete name with `[[ =~ ]]`, the same ERE syntax. A status 2 fails the run rather than leaving a name unprotected. Used for restore, removal of attempt-created ignored files and the judged-tree check. Case `newline-protected`; its mutant restores the grep form. |
+| C2 (medium) | A protected file that git ignores and that existed before the attempt is not restored. The coder edits it in place and the judge passes on that edit, which no commit contains. | **Yes.** Coder rewrites the ignored `testdata/x.golden` to pass: the worktree passes and the run prints `every task passes` with rc 0, while **nothing is committed**. The success was computed on the worktree, not on any commit, so the message is wrong. | **Fixed by refusal.** Before the coder is launched (and before the attempt is counted), a run stops if any git-ignored path matches a protected pattern. The alternative, restoring such files from a copy, is deferred decision 20. Case `ignored-protected-preexisting`. |
+| C3 (low) | A run that starts with every task passing exits 0 with `every task passes`, but `format_check` and `check` never run. | **Yes.** `format_check` set to `false` and an already-passing task: rc 0, `format_check` did not run. | **Message corrected.** A run that commits nothing logs `every task passes; format_check and check were not run (run --check to run them)`. The exit status is unchanged. Whether such a run should run the gates is deferred decision 19. Case `all-pass-start`. |
+| C4 (low) | The formatter runs on a timed-out coder's partial output. | **Yes.** The coder wrote `code` and timed out: `.loop/format-runs` was written, so the formatter ran. | **Fixed.** The formatter runs only while the attempt is still `ok`. Case `format-after-timeout`. |
+| H1 | Artifacts created by the judge before the attempt (during `first_failing`) are treated as pre-existing and kept on discard. | Not reproduced. Needs a test whose artifact only appears on failure. | **Not changed.** It is an instance of decisions 14 and 15 (ignored files), and is contrived. |
+| H2 | A `git commit` failure after a judged pass stops the run with the judged changes staged. | Not reproduced. | **Not changed.** The run fails loudly; this is the family of deferred decision 16. |
+
+Behaviour changes a reader should know about:
+
+- A protected pattern now matches the complete file name. A name that contains a newline
+  is matched as one name. A name such as `x<LF>PROMPT.md` was protected before only
+  because its second line matched; it is a different file and is not protected now.
+- A run stops with exit 1 before any coder launch when a protected path is git-ignored
+  before the attempt. The message names the first such path.
+- A run that starts with every task passing logs that `format_check` and `check` were
+  not run. Its exit status is still 0.
+- A formatter does not run after a coder timeout.
+
+### Performance (fourth continuation)
+
+Attempt path: one passing attempt with a fake coder per run (`MAX_ITER=1`, so the run stops
+at the cap after its commit; each run was checked to contain exactly one new commit). Disposable
+repositories under `/tmp/rl-exp5`, three runs each, `/tmp/rl-exp5/bin/bench.sh` (not committed).
+The machine was shared with an unrelated running loop, so these figures are indicative.
+
+| Files the attempt touches | `623e758` (s) | Working tree (s) |
+| --- | --- | --- |
+| none | 0.367, 0.378, 0.384 | 0.365, 0.401, 0.360 |
+| 2,000 untracked files created by the coder | 14.935, 14.644, 16.651 | 0.791, 0.681, 0.719 |
+| 20,000 git-ignored, unprotected files present before the attempt | 0.566, 0.538, 0.604 | 1.199, 1.119, 1.182 |
+
+Matching a changed name no longer starts a `grep` process per name, which made the 2,000-file
+attempt about 20 times faster (median 14.9 s to 0.7 s). The new refusal checks every
+pre-existing ignored name once per attempt in bash: about 0.6 s at 20,000 names (roughly
+30 µs each), growing linearly with the number of ignored files. With no ignored files it
+adds no measurable time.
+
+Orchestration benchmark (`tests/benchmark_loop.py`, 40 no-op tasks, three runs each):
+
+| Runner | `--check-once` median (runs) | `--check` median (runs) |
+| --- | ---: | ---: |
+| `623e758` | 0.543 s (0.504, 0.543, 0.547) | 6.559 s (6.559, 7.074, 6.123) |
+| working tree | 0.565 s (0.565, 0.708, 0.542) | 7.025 s (7.025, 7.055, 6.950) |
+
+Check-only modes call none of the changed functions. On this shared machine the medians differ
+by about the run-to-run spread. This is not a measured regression, and it does not prove that
+check timing is unchanged.
+
+Not measured: coder time, application test time, Linux, GNU `grep` and `timeout`, ignored trees
+larger than 20,000 files, and the cost of a protected file that the attempt itself creates.
+
+### Validation (fourth continuation, observed in this session)
+
+- Reproduction on `623e758`, before any edit: C1 to C4 each reproduced (table above). Observed:
+  C1 committed `testdata/a<LF>b.golden` with rc 0; C2 printed `every task passes` with rc 0 and
+  committed nothing (the pass came from the worktree, which still held the coder's edit to the
+  ignored file; the committed tree was not tested); C3 exited 0 and `format_check` did not run; C4 ran
+  the formatter on the timed-out output.
+- Each new case fails on the `623e758` runner for its stated reason: `newline-protected`
+  (got 0, expected 2), `ignored-protected-preexisting` (got 3, expected 1), `all-pass-start`
+  (the message is absent) and `format-after-timeout` (the formatter ran). Each passes on the
+  working tree.
+- Each new case has a mutant, a disposable copy with the old behaviour restored. All 72 mutants
+  were caught in the final run. The `formatted` and `custom-tasks-*` mutant anchors were updated
+  to the new text. A first full run stopped at the `custom-tasks-*` anchor (`mutation anchor
+  absent`, `EXIT=1`, `/tmp/rl-exp5/suite-1.log`). That run is not counted.
+- `bash scripts/test_loop.sh` on the final files (`scripts/loop.sh` SHA-256 `aef6a196…`,
+  `scripts/test_loop.sh` SHA-256 `91709bc6…`): **72/72 cases passed, 72/72 regressions caught,
+  exit 0** (`/tmp/rl-exp5/suite-2.log`). The four new cases are `newline-protected`,
+  `ignored-protected-preexisting`, `all-pass-start` and `format-after-timeout`.
+- `python3 -I tests/test_install.py`, `tests/test_kit_format.py` and `tests/test_runner_config.py`:
+  each exit 0 (`OK`).
+- `tests/run.sh` (Go toy kit) with `GOPROXY=off`, `GOTOOLCHAIN=local` and temporary `GOCACHE` and
+  `GOMODCACHE`: 13 `ok`, exit 0.
+- `/bin/bash -n` on `scripts/loop.sh`, `scripts/test_loop.sh`, `scripts/install.sh`, `tests/run.sh`
+  and `tests/fakecoder.sh`: passed. `git diff --check`: clean.
+- Whole-name matching was compared with the old line-based grep on sample names
+  (`/tmp/rl-exp5/bin/matcher.sh`). The two names that differ are `x<LF>PROMPT.md` (now not
+  protected, correct: a different file) and `testdata/a<LF>b.golden` (now protected, correct).
+- Hashes of the HEAD runner (`623e758`): `scripts/loop.sh` `0fe0f14b…`.
+
+Environment limits: macOS `/bin/bash` 3.2.57 (arm64) only; no GNU `grep`, GNU `timeout` or Linux;
+no live coder, no real kit and no model call; the fixtures and benchmarks were in `/tmp` and
+are not committed. No independent review of these changes has been run.
+
+### Fourth continuation: open items
+
+- **Decision 19 (new).** A run that starts with every task passing runs no `format_check`
+  or `check`. Should it run them and exit non-zero on failure, or keep the current
+  message? Owner choice.
+- **Decision 20 (new).** A protected path that git ignores before an attempt now stops
+  the run. Alternative: restore such files from a content copy taken before the coder
+  runs, which keeps the run usable but adds a copy per attempt and needs a symlink-safe
+  restore. Owner choice.
+- Review-5 was made by the same model family as the writer. No independent review of
+  these changes has been run, and this session cannot run one (it may not start a model).
+
 ## Runner investigation (round one, unchanged)
 
 Each item was reproduced first in disposable fixtures with the unmodified runner
@@ -556,6 +669,8 @@ case is valid for this user); no live coder, no live kit, no model calls. The
 16. **New (second continuation).** An attempt-mode git failure while snapshotting (finding 6) stops the run with the attempt's changes left in the worktree. Discarding them automatically is the alternative; it changes the attempt-discard policy (decision 6). Owner choice.
 17. **New (third continuation).** Should a pass that leaves the tree unchanged count as a failed attempt (current; R3), or end the run as complete because the task already passes? Owner choice.
 18. **New (third continuation).** Should judging detect protected writes made and restored within the judge window (R5)? Options as in decision 14 (c). Owner choice.
+19. **New (fourth continuation).** Should a run that starts with every task passing run `format_check` and `check` (and fail if they fail)? Current: no; it logs that they were not run and exits 0. Owner choice.
+20. **New (fourth continuation).** A git-ignored protected path that exists before an attempt stops the run (current). The alternative is restoring it from a content copy before the coder runs. Owner choice.
 
 ## Source state
 
@@ -571,6 +686,11 @@ case is valid for this user); no live coder, no live kit, no model calls. The
   `README.md` `f6dfd0774e309c08302c81828c75404b442a3bc2fce575e00967bebfc9622e6a`.
 - Baseline `scripts/loop.sh` SHA-256 at `a1f9daa`: `232a5c0a35496f10e791ab164f0a12b9760e9260025017252d53f9bb6f7097a1`.
 - Third continuation (base `3473942`, final files): `scripts/loop.sh` `0fe0f14b13c12e0a2b19295f55147c444db5390ac7fab9e9b24e7616d2021e64`; `scripts/test_loop.sh` `3e97dc7fe4f93ceb4002704f019904f1eeed705f8f2240748d9e4a2c69549a2f`. Changed: `scripts/loop.sh`, `scripts/test_loop.sh`, `SKILL.md`, `README.md` (count only), this report.
+- Fourth continuation (base `623e758`, which follows `816f36f`): changed files `scripts/loop.sh`,
+  `scripts/test_loop.sh`, `SKILL.md`, `README.md` (case count), this report. SHA-256 of the final
+  files (the validated 72-case run): `scripts/loop.sh` `aef6a19667b3f0c5e35bab06d48ac9a6f95a406dd7321487508c464ee3c5b2b5`;
+  `scripts/test_loop.sh` `91709bc6f7f40dcf5707e576af231d84ea84cda068bccd96ae8d09ba0a5ffff1`.
+  The commit is recorded in `git log`.
 - Untracked `ARTICLE-DRAFT.md` left untouched and not committed.
 - Not merged to `main`; pending independent review. No remote operation.
 
@@ -579,3 +699,9 @@ case is valid for this user); no live coder, no live kit, no model calls. The
 During the first round of work, a `scripts/loop.sh --check` run in
 `/Users/rob/Development/drift` from another session was active (PID 35018). I did
 not inspect, stop or touch it, or that repository. Not observed in this round.
+
+During the fourth continuation, `ps` showed two other `scripts/loop.sh` processes that are not
+this repository's: one started by `run-loop.sh` under `/Users/rob/Development/drift-loop-eval/run26-stage6a2`,
+and one whose working directory (read with `lsof`) is `/Users/rob/Development/makeready/tools/comps`.
+I did not read, stop or touch either. Their working directories are other repositories, so
+they are not writers to this one as far as I observed; what they do in their own repositories is unknown.

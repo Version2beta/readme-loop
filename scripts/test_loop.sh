@@ -725,6 +725,79 @@ SH
       [ ! -d sub/.loop ] || fail 'state created in the subdirectory'
       unchanged
       ;;
+    newline-protected)
+      # The pattern spans a newline. A coder creates the protected file whose name has a newline
+      # and makes the test pass. Only whole-name matching restores or removes it.
+      config '.protected += ["^testdata/.*\\.golden$"]'
+      cat > verify.sh <<'SH'
+#!/usr/bin/env bash
+[ -e "$(printf 'testdata/a\nb.golden')" ] && printf 'PASS T1\n'
+SH
+      cat > fake.sh <<'SH'
+#!/usr/bin/env bash
+cat >/dev/null
+mkdir -p testdata; printf 'x\n' > "$(printf 'testdata/a\nb.golden')"
+SH
+      git add -A && git commit -qm 'newline-named protected fixture'
+      before=$(git rev-list --count HEAD)
+      MAX_ITER=2 MAX_ATTEMPTS=2 run
+      equal "$rc" 2 'a protected file whose name spans a newline fails every attempt'
+      unchanged
+      [ ! -e "$(printf 'testdata/a\nb.golden')" ] || fail 'protected newline-named file left in the worktree'
+      ;;
+    ignored-protected-preexisting)
+      # A protected file that git ignores existed before the attempt. The coder edits it in place,
+      # and the test would pass on that edit, which no commit can contain. Refuse before the coder.
+      printf 'testdata/\n' >> .gitignore
+      cat > verify.sh <<'SH'
+#!/usr/bin/env bash
+[ "$(cat testdata/x.golden 2>/dev/null)" = good ] && printf 'PASS T1\n'
+SH
+      config '.protected += ["^testdata/.*\\.golden$"]'
+      mkdir -p testdata; printf 'bad\n' > testdata/x.golden
+      cat > fake.sh <<'SH'
+#!/usr/bin/env bash
+cat >/dev/null
+printf 'good\n' > testdata/x.golden
+SH
+      git add -A && git commit -qm 'coder fixture'
+      before=$(git rev-list --count HEAD)
+      MAX_ITER=1 run
+      equal "$rc" 1 'a git-ignored protected file is refused before any attempt'
+      contains "$work/output" 'protected path is git-ignored before the attempt: testdata/x.golden'
+      if grep -q 'Coder-Command' .loop/loop.log; then fail 'coder was launched for a refused attempt'; fi
+      equal "$(<testdata/x.golden)" bad 'pre-existing protected file is not edited'
+      unchanged
+      ;;
+    all-pass-start)
+      # Every task passes before the run starts. Nothing is committed, so the kit's format_check
+      # (which fails here) never runs. The success message must not claim that it ran.
+      config '.format_check = "echo ran >> .loop/fc-runs; false"'
+      printf 'good\n' > code
+      git add -A && git commit -qm 'code already passes'
+      before=$(git rev-list --count HEAD)
+      run; equal "$rc" 0 'a run that starts with every task passing exits 0'
+      contains "$work/output" 'every task passes; format_check and check were not run'
+      [ ! -e .loop/fc-runs ] || fail 'format_check ran although the run reported it did not'
+      unchanged
+      ;;
+    format-after-timeout)
+      # A coder writes a passing change and then times out. Its partial output is neither judged
+      # nor formatted, so the kit's formatter must not run on it.
+      config '.format = "echo ran >> .loop/format-runs"'
+      cat > fake.sh <<'SH'
+#!/usr/bin/env bash
+cat >/dev/null
+printf 'good\n' > code
+sleep 3
+SH
+      git add fake.sh && git commit -qm 'coder writes, then times out'
+      before=$(git rev-list --count HEAD)
+      MAX_ITER=1 ITER_SECONDS=1 run; equal "$rc" 3 'run stops at the iteration cap'
+      contains .loop/loop.log 'coder timed out'
+      [ ! -e .loop/format-runs ] || fail 'formatter ran on the output of a timed-out coder'
+      unchanged
+      ;;
     *) fail "unknown case $1";;
   esac
 }
@@ -767,7 +840,7 @@ mutate() {
   [[ $source == *"$old"* ]] || fail "mutation anchor absent: $old"
   source=${source/"$old"/"$new"}
 }
-cases=(search-count notes notes-cross-task judge-writes formatter-protected good formatted protected substring stderr nonzero hang empty-command empty-expect missing-expect legacy untracked defaults hard escalation check-format check-command earlier timeout-format timeout-format-check timeout-check check-once check-once-metadata check-once-select check-once-gates custom-tasks-plus custom-tasks-dot custom-tasks-absolute check-mutation check-once-mutation timeout-ignores-term coder-ignores-term task-nul empty-override blank-command newline-expect rename-protected quoted-protected gitignore-edit coder-timeout protected-window check-untracked unreadable-snapshot index-flags index-flags-skip index-flag-startup index-flags-both index-flag-both-startup judge-flag ignored-discard ignored-pass-warning ignored-protected quoted-discard newline-discard plusplus-note attempts-corrupt blank-kit-command glob-pathspec newline-index-flag-startup newline-index-flag ignore-rule-outside empty-pass subdir-start)
+cases=(search-count notes notes-cross-task judge-writes formatter-protected good formatted protected substring stderr nonzero hang empty-command empty-expect missing-expect legacy untracked defaults hard escalation check-format check-command earlier timeout-format timeout-format-check timeout-check check-once check-once-metadata check-once-select check-once-gates custom-tasks-plus custom-tasks-dot custom-tasks-absolute check-mutation check-once-mutation timeout-ignores-term coder-ignores-term task-nul empty-override blank-command newline-expect rename-protected quoted-protected gitignore-edit coder-timeout protected-window check-untracked unreadable-snapshot index-flags index-flags-skip index-flag-startup index-flags-both index-flag-both-startup judge-flag ignored-discard ignored-pass-warning ignored-protected quoted-discard newline-discard plusplus-note attempts-corrupt blank-kit-command glob-pathspec newline-index-flag-startup newline-index-flag ignore-rule-outside empty-pass subdir-start newline-protected ignored-protected-preexisting all-pass-start format-after-timeout)
 fails=0
 for name in "${cases[@]}"; do
   if bash "$0" --case "$name" "$loop" > "$work/case.log" 2>&1; then
@@ -785,7 +858,7 @@ for name in "${cases[@]}"; do
     formatter-protected) mutate 'revert_protected # Formatting must not change protected paths either.' ': # formatter protected edits survive';;
     good) mutate 'Coder-Command: $cmd"' 'model: $cmd"';;
     formatted)
-      mutate 'if [ -n "$FORMAT_CMD" ]; then run_judge_command format "$FORMAT_CMD" || ok=0; fi' ':'
+      mutate 'if [ -n "$FORMAT_CMD" ] && [ "$ok" = 1 ]; then run_judge_command format "$FORMAT_CMD" || ok=0; fi' ':'
       mutate 'commit_attempt "loop: $id passes (attempt $n)"' 'bash -c "$FORMAT_CMD"; commit_attempt "loop: $id passes (attempt $n)"'
       ;;
     protected)
@@ -801,7 +874,7 @@ for name in "${cases[@]}"; do
     hang|timeout-*) mutate '"$TIMEOUT" -k "$KILL_GRACE" "$JUDGE_TIMEOUT" bash -c "$command"' 'bash -c "$command"';;
     coder-ignores-term) mutate '"$TIMEOUT" -k "$KILL_GRACE" "$ITER_SECONDS"' '"$TIMEOUT" "$ITER_SECONDS"';;
     task-nul) mutate "if jq -e 'any(.tasks[]; ([.id" "if false && jq -e 'any(.tasks[]; ([.id";;
-    custom-tasks-*) mutate '[ "$f" = "$tasks_rel" ]' 'false';;
+    custom-tasks-*) mutate '[ "$1" = "$tasks_rel" ]' 'false';;
     check-mutation|check-once-mutation) mutate 'if ! now=$(tree_snapshot); then log "could not snapshot the working tree"; return 0; fi
   [ "$now" != "$1" ] || return 1' 'return 1';;
     empty-command) mutate '[[ ${!setting} =~ [^[:space:]] ]] || die "$setting is empty or blank"' ':';;
@@ -866,6 +939,15 @@ $untracked"' ':'
     newline-index-flag) mutate "LC_ALL=C grep -azE '^[hsS] ' \"\$state/index-flags\" || rc=\$?" "tr '\\0' '\\n' < \"\$state/index-flags\" | sed -n -e 's/^[hsS] //p' | tr '\\n' '\\0' || rc=\$?";;
     ignore-rule-outside) mutate 'git check-ignore -q "$state/x" || die "$state/ is still not ignored after restoring .gitignore (check .git/info/exclude); stopping"' ':';;
     empty-pass) mutate 'if [ "$ok" = 1 ] && [ "$judged_tree" = "$(git rev-parse HEAD^{tree})" ]; then' 'if false; then';;
+    newline-protected) mutate 'is_protected() {
+  local rc=0
+  [[ $1 =~ $PROTECTED ]] || rc=$?
+  [ "$rc" != 2 ] || die "could not match protected patterns: $PROTECTED"
+  [ "$rc" = 0 ] || [ "$1" = "$tasks_rel" ]
+}' 'is_protected() { grep -qE -- "$PROTECTED" <<< "$1" || [ "$1" = "$tasks_rel" ]; }';;
+    ignored-protected-preexisting) mutate 'if pf=$(first_protected "$state/ignored.before"); then' 'if false; then';;
+    all-pass-start) mutate 'log "every task passes; format_check and check were not run (run --check to run them)"' 'log "every task passes"';;
+    format-after-timeout) mutate 'if [ -n "$FORMAT_CMD" ] && [ "$ok" = 1 ]; then' 'if [ -n "$FORMAT_CMD" ]; then';;
     subdir-start) mutate '[ -z "$(git rev-parse --show-prefix)" ] || die "run from the repository top level, not a subdirectory"' ':';;
   esac
   printf '%s\n' "$source" > "$work/regressed.sh"

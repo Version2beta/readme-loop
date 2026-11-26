@@ -320,6 +320,23 @@ if [ "$CHECK_ONLY" = 1 ]; then
   exit "$bad"
 fi
 
+# Whole-name match. The pattern is applied to the complete name, so ^ and $ anchor its
+# ends and a pattern may span a newline inside a name. Matching one line at a time (grep)
+# let such a name escape. Status 2 (an invalid pattern) fails closed, not as unprotected.
+is_protected() {
+  local rc=0
+  [[ $1 =~ $PROTECTED ]] || rc=$?
+  [ "$rc" != 2 ] || die "could not match protected patterns: $PROTECTED"
+  [ "$rc" = 0 ] || [ "$1" = "$tasks_rel" ]
+}
+# Prints the first NUL-delimited name in $1 that is protected; returns 1 if none is.
+first_protected() {
+  local f
+  while IFS= read -r -d '' f; do
+    if is_protected "$f"; then printf '%s\n' "$f"; return 0; fi
+  done < "$1"
+  return 1
+}
 revert_protected() {
   local f
   # NUL-delimited, with renames disabled: git quotes unusual names in line output,
@@ -331,15 +348,17 @@ revert_protected() {
     die "could not list changed paths"
   while IFS= read -r -d '' f; do
     [ -n "$f" ] || continue
-    if grep -qE -- "$PROTECTED" <<< "$f" || [ "$f" = "$tasks_rel" ]; then
+    if is_protected "$f"; then
       if git cat-file -e "HEAD:$f" 2>/dev/null; then git checkout -q HEAD -- ":(literal)$f"; else rm -f -- "$f"; fi
     fi
   done < "$state/paths"
   # Ignored files are not in the listing above. Remove the protected ones this
   # attempt created, so the judge cannot pass on a file the commit does not contain.
+  # Protected ignored files that existed before the attempt are refused before the
+  # coder runs (see the attempt loop), so they cannot be edited unseen.
   ignored_since_attempt || die "could not list ignored files"
   while IFS= read -r -d '' f; do
-    if grep -qE -- "$PROTECTED" <<< "$f" || [ "$f" = "$tasks_rel" ]; then
+    if is_protected "$f"; then
       log "removing protected ignored file created by the attempt: $f"; rm -f -- "$f"
     fi
   done < "$state/ignored.new"
@@ -361,7 +380,7 @@ protected_in_tree() { # $1 = tree; returns 0 if it changes a protected path rela
   git diff-tree -r -z --no-renames --name-only HEAD "$1" > "$state/tree-paths" ||
     { log "could not list the judged tree; refusing"; return 0; }
   while IFS= read -r -d '' f; do
-    if grep -qE -- "$PROTECTED" <<< "$f" || [ "$f" = "$tasks_rel" ]; then
+    if is_protected "$f"; then
       log "protected path changed before judging: $f"; return 0
     fi
   done < "$state/tree-paths"
@@ -374,9 +393,24 @@ commit_attempt() {
   [ "$(git rev-parse HEAD^{tree})" = "$judged_tree" ] || die "commit differs from judged tree"
   [ -z "$(git status --porcelain)" ] || die "working tree is dirty after commit"
 }
+committed=0
 for ((iter = 1; iter <= MAX_ITER; iter++)); do
   idx=$(first_failing)
-  if [ "$idx" -lt 0 ]; then log "every task passes"; exit 0; fi
+  if [ "$idx" -lt 0 ]; then
+    # format_check and check run before each commit, not at the start of a run. A run
+    # that commits nothing has not run them, and its message must not imply it has.
+    if [ "$committed" = 1 ]; then log "every task passes"
+    else log "every task passes; format_check and check were not run (run --check to run them)"; fi
+    exit 0
+  fi
+  # A protected path that git ignores before the attempt is neither restored nor committed.
+  # The coder could edit it in place and the judge would pass on that edit, so refuse before
+  # the attempt is counted or the coder runs. The listing is taken here: nothing in the
+  # worktree changes between this point and the coder launch.
+  list_ignored "$state/ignored.before" || die "could not list ignored files"
+  if pf=$(first_protected "$state/ignored.before"); then
+    die "protected path is git-ignored before the attempt: $pf (un-ignore or move it, or stop protecting it)"
+  fi
   id=$(task "$idx" id); tier=$(task "$idx" tier)
   prev=$(cat "$state/attempts.$id" 2>/dev/null || echo 0)
   # Coder-writable state is read as a plain count only: never evaluated as arithmetic.
@@ -404,7 +438,6 @@ for ((iter = 1; iter <= MAX_ITER; iter++)); do
     fi
   } > "$state/prompt.md"
   log "iter $iter  task $id  attempt $n/$MAX_ATTEMPTS  Coder-Command: $cmd"
-  list_ignored "$state/ignored.before" || die "could not list ignored files"
   rc=0
   TASK_ID=$id ATTEMPT=$n "$TIMEOUT" -k "$KILL_GRACE" "$ITER_SECONDS" bash -c "$cmd" < "$state/prompt.md" > "$state/coder.$id.$n.log" 2>&1 || rc=$?
   [ "$rc" = 124 ] && log "coder timed out after ${ITER_SECONDS}s"
@@ -414,7 +447,8 @@ for ((iter = 1; iter <= MAX_ITER; iter++)); do
   ok=1
   # Timeouts fail attempts (SKILL.md): partial output from a killed coder is never judged or committed.
   if [ "$rc" = 124 ] || [ "$rc" = 137 ]; then ok=0; fi
-  if [ -n "$FORMAT_CMD" ]; then run_judge_command format "$FORMAT_CMD" || ok=0; fi
+  # A timed-out coder's partial output is not formatted either (not judged, not committed).
+  if [ -n "$FORMAT_CMD" ] && [ "$ok" = 1 ]; then run_judge_command format "$FORMAT_CMD" || ok=0; fi
   revert_protected # Formatting must not change protected paths either.
   git add -A
   judged_tree=$(git write-tree)
@@ -439,6 +473,7 @@ for ((iter = 1; iter <= MAX_ITER; iter++)); do
   fi
   if [ "$ok" = 1 ]; then
     commit_attempt "loop: $id passes (attempt $n)" "$judged_tree"
+    committed=1
     rm -f "$state/last.$id.diff"
     log "$id passed"
     # Not committed and not removed: they stay in the worktree and can affect later
