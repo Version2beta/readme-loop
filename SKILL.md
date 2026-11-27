@@ -3,7 +3,7 @@ name: readme-loop
 description: Complete the agreed README scope in one invocation, with independently owned behavioral acceptance. Use for README discovery, clarification, implementation, evaluation and bounded corrective work. References and elaborate kits are optional, not prerequisites.
 license: MIT
 metadata:
-  version: "0.2"
+  version: "0.2.0"
 ---
 
 # readme-loop
@@ -72,6 +72,50 @@ Keep material decisions and their rationale/status (proposed, approved, deferred
 superseded) concise in the README. Update the actual promises too. Use module
 READMEs or supporting schemas only where they resolve real ambiguity. Do not
 require an audit history of every implementation choice or a duplicate SPEC.
+
+### Incremental development
+
+A README is a living contract. Subsequent invocations may extend, revise,
+clarify, or remove previously agreed requirements.
+
+When working on an existing project:
+
+- Establish the previous accepted contract, current intended contract,
+  implementation state, and available acceptance evidence.
+- Use Git history, existing tests, previous delivery records, and current
+  source as evidence where available. Do not require a separate specification,
+  manifest, or requirements database.
+- Identify behavioral changes rather than treating every textual change as a
+  new requirement.
+- Distinguish added, modified, removed, clarified, unchanged, and previously
+  unfulfilled requirements.
+- Reuse established decisions, implementation, acceptance checks, and evidence
+  wherever they remain applicable.
+- Identify dependencies and affected guarantees, including interactions with
+  unchanged functionality.
+- Establish independent acceptance for new or changed behavior before
+  implementing it.
+- Preserve unchanged acceptance obligations. When an approved requirement
+  supersedes an earlier one, update the affected acceptance checks through the
+  acceptance owner.
+- Do not assume removing a promise from the README necessarily authorizes
+  removing working functionality, breaking compatibility, or deleting data.
+- Make the smallest complete implementation change that satisfies the agreed
+  contract. Avoid unrelated refactoring.
+- Run focused verification of changed behavior and regression checks
+  appropriate to the affected guarantees.
+
+The current README defines the intended product. Previous acceptance evidence
+establishes what was demonstrated about an earlier candidate, not what is
+necessarily true of the current candidate.
+
+Complete the entire agreed increment in one invocation. Clearly distinguish
+newly verified behavior, previously established evidence, outstanding
+requirements, and any regressions.
+
+Do not rebuild the product, recreate its acceptance suite, or repeat
+preparation merely because the README has changed. Scale the effort to the
+semantic change and its consequences.
 
 ### Required preflight: make the whole run executable
 
@@ -206,7 +250,7 @@ Add work only to close an important uncertainty:
 
 This does not automatically switch workflows or add another specification kit.
 
-## Unattended work and old projects
+## Unattended work
 
 Use a supported persistent host/job when unattended execution is authorized.
 Record where status, outputs and stop controls live, and verify actual progress.
@@ -214,9 +258,3 @@ A controller that only schedules work is not a competing repository writer:
 the delegated implementation worker is the sole writer. Never wait for that
 controller to exit while it is waiting for your result. Diagnose an actual
 coordination failure rather than restarting an unchanged failure indefinitely.
-
-Old v0.1 projects may already contain `tasks.json`, `SPEC.md` and `loop.sh`.
-Do not silently migrate them, reinterpret their acceptance or launch their
-automatic commit/discard loop. Their historical format is documented in
-[references/kit-format.md](references/kit-format.md). It is not the new default;
-new readme-loop assignments do not depend on that format or another project.

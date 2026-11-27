@@ -1,5 +1,5 @@
-# Expensive v0.1 compatibility checks stay separate from the lightweight default.
-name: Legacy runner compatibility
+# Old runner tests stay separate from the lightweight workflow checks.
+name: Legacy runner tests
 on:
   workflow_dispatch:
   push:

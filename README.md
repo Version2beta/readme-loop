@@ -7,9 +7,9 @@ agreed user-facing contract. Its objective is minimum total engineering cost and
 time to an appropriate, demonstrable level of correctness—not minimum coder
 spending or maximum verification volume.
 
-Version 0.2 defines an independent, lightweight workflow. It does not invoke or
-track spec-loop, and does not require its kit format or runner. Historical v0.1
-files remain for existing projects; they are not prerequisites for new work.
+Version 0.2.0 is a development release, not a production-ready release. The
+workflow is independent of spec-loop and does not require its kit format or
+runner.
 
 ## Install and start
 
@@ -92,6 +92,24 @@ An optional reference or small independent oracle may repay its preparation
 cost on difficult or repeatedly implemented behavior. Its existence does not
 prove the requirements are right or exclude correlated defects.
 
+## Incremental development
+
+The README is a living contract. Use the same workflow to add, change, clarify
+or retire requirements in an existing project. Compare the previously accepted
+contract, the current README and the implementation to identify what actually
+changes, what stays the same and what was never fulfilled.
+
+Reuse decisions, implementation and acceptance checks where they still apply.
+Establish independently owned acceptance for new or changed behavior before
+implementation, preserve unchanged obligations, and check for regressions where
+existing behavior is affected. Removing a promise is not by itself permission
+to remove working functionality, break compatibility or delete data.
+
+Complete the entire agreed increment in one invocation. In the handoff,
+distinguish newly verified behavior from earlier evidence, outstanding
+requirements and regressions. See
+[the skill instructions](SKILL.md#incremental-development).
+
 ## Single-pass checks
 
 Prefer native commands. The optional helper requires Python 3.9+, Bash and a
@@ -149,7 +167,7 @@ cheap coder run or a no-op benchmark.
 
 ## Local validation
 
-Fast checks for the new workflow's packaging/helper:
+Fast checks for packaging and the single-pass helper:
 
 ```sh
 python3 tests/test_install.py
@@ -159,20 +177,19 @@ python3 tests/test_check.py
 They use disposable directories and scripted commands, not models. The check
 helper has no application-stage benchmark yet. Packaging and local command tests
 do not establish live host behavior, application correctness or lifecycle savings.
-CI defines Linux/macOS jobs and a Python 3.9 compatibility job; minimum-version
-runtime compatibility has not been checked locally. A workflow file is not proof
-that CI ran. Distribution archives and the installer include legacy compatibility
-files too; loading them is not part of the lightweight default.
+CI is configured to run the packaging and helper checks on Linux and macOS,
+including a Python 3.9 job on Linux.
 
-### Historical compatibility
+### Historical runner
 
-`scripts/loop.sh`, its fixtures, [kit format](references/kit-format.md) and
-[protected-surface template](references/protected-surface.md) are v0.1 compatibility
-artifacts. Their full `--check` retains its repeated-task semantics. Do not use it
-as the default v0.2 acceptance gate or silently migrate a project that relies on
-it. No updates to spec-loop, SIE or installed skills are part of this revision.
+The archived [kit format](references/kit-format.md) and
+[protected-surface template](references/protected-surface.md) describe the old
+runner, not the current workflow. The distribution still contains the runner
+and fixtures, but this release does not promise v0.1 interface or workflow
+compatibility. The old runner's repeated-task `--check` is not an acceptance
+requirement for readme-loop.
 
-The inherited checks remain available separately:
+To test the old runner separately:
 
 ```sh
 python3 tests/test_kit_format.py
@@ -186,8 +203,10 @@ Go and Perl. Mutation preparation uses a guarded literal byte replacement rather
 than Bash 3.2's slow multibyte pattern replacement. All real/mutated cases retain
 their assertions, each case has a 45-second outer deadline, and outer timeouts do
 not qualify a mutation as caught. CI separates fixture and toy steps, reports
-case progress, and caps the legacy job at 15 minutes. The [development review](references/development-review.md) records earlier
-maintenance and limited benchmarks, not v0.2 validation or a comparative result.
+case progress, and caps the legacy job at 15 minutes. The
+[development review](references/development-review.md) records earlier
+maintenance and limited benchmarks, not validation of the current workflow or a
+comparative result.
 
 ## Decisions and status
 
@@ -195,13 +214,16 @@ maintenance and limited benchmarks, not v0.2 validation or a comparative result.
 | --- | --- | --- |
 | Develop readme-loop independently from spec-loop and SIE. | Keep its scope and costs accountable to this workflow. | Approved |
 | README-first; independently owned behavioral acceptance; implementation freedom. | Preserve the useful distinction between intent, implementation and success. | Approved |
-| Lightweight default; references, kits and stronger verification justified by risk/reuse rather than universally required. | Optimize total engineering effort and time to value. Supersedes v0.1's mandatory preparation. | Approved |
-| Native checks, single-pass acceptance, bounded review/correction. | Remove routine repetition without treating incomplete evidence as success. Supersedes the default full legacy gate. | Approved |
+| Lightweight default; references, kits and stronger verification justified by risk/reuse rather than universally required. | Optimize total engineering effort and time to value. | Approved |
+| Native checks, single-pass acceptance, bounded review/correction. | Remove routine repetition without treating incomplete evidence as success. | Approved |
 | One invocation completes the entire agreed scope; internal milestones are not automatic approval or delivery gates. | Preserve autonomous responsibility rather than stopping at the first working subset. | Approved |
 
-The source skill and optional helper are under local development. No v0.2 live
-implementation trial, controlled framework comparison or measured end-to-end
-speedup is claimed. Existing installed copies are not automatically updated.
+The skill documents the workflow for both new builds and incremental changes.
+Automated checks exercise packaging, installation and the optional single-pass
+helper without calling models. End-to-end acceptance in a live agent session,
+including on an existing project, still awaits empirical validation. No
+controlled framework comparison or measured end-to-end speedup is claimed.
+Existing installed copies are not automatically updated.
 
 ## Background
 
